@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CADisableMinimumFrameDurationOnPhone</key>
+	<true/>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>CFBundleDisplayName</key>
+	<string>AthleteSetu</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>athlete_setu</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>$(FLUTTER_BUILD_NAME)</string>
+	<key>CFBundleSignature</key>
+	<string>????</string>
+	<key>CFBundleVersion</key>
+	<string>$(FLUTTER_BUILD_NUMBER)</string>
+	<key>LSRequiresIPhoneOS</key>
+	<true/>
+	<key>UIApplicationSceneManifest</key>
+	<dict>
+		<key>UIApplicationSupportsMultipleScenes</key>
+		<false/>
+		<key>UISceneConfigurations</key>
+		<dict>
+			<key>UIWindowSceneSessionRoleApplication</key>
+			<array>
+				<dict>
+					<key>UISceneClassName</key>
+					<string>UIWindowScene</string>
+					<key>UISceneConfigurationName</key>
+					<string>flutter</string>
+					<key>UISceneDelegateClassName</key>
+					<string>$(PRODUCT_MODULE_NAME).SceneDelegate</string>
+					<key>UISceneStoryboardFile</key>
+					<string>Main</string>
+				</dict>
+			</array>
+		</dict>
+	</dict>
+	<key>UIApplicationSupportsIndirectInputEvents</key>
+	<true/>
+	<key>UILaunchStoryboardName</key>
+	<string>LaunchScreen</string>
+	<key>UIMainStoryboardFile</key>
+	<string>Main</string>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<key>UISupportedInterfaceOrientations~ipad</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<key>NSCameraUsageDescription</key>
+	<string>AthleteSetu records SAI fitness test attempts and measures them on-device. Video never leaves this phone. / AthleteSetu SAI फिटनेस परीक्षण रिकॉर्ड करता है; वीडियो फ़ोन से बाहर नहीं जाता।</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Audio is recorded with test videos so assessors can hear start signals. / परीक्षण वीडियो के साथ ऑडियो रिकॉर्ड होता है।</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Pick a photo of a signed guardian consent form or weighing-scale display. / अभिभावक सहमति पत्र या वज़न मशीन की फ़ोटो चुनें।</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Save exported bilingual PDF reports. / द्विभाषी PDF रिपोर्ट सहेजें।</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>The assessment venue location is tagged on recorded test videos. / रिकॉर्ड किए गए वीडियो पर परीक्षण स्थल का स्थान जोड़ा जाता है।</string>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Pair a second phone offline as a finish or turn timing gate. / दूसरे फ़ोन को ऑफ़लाइन टाइमिंग गेट के रूप में जोड़ें।</string>
+	<key>NSBluetoothPeripheralUsageDescription</key>
+	<string>Pair a second phone offline as a finish or turn timing gate. / दूसरे फ़ोन को ऑफ़लाइन टाइमिंग गेट के रूप में जोड़ें।</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Sync the timing-gate clock with a nearby phone over local Wi-Fi without internet. / बिना इंटरनेट स्थानीय Wi-Fi पर दूसरे फ़ोन से घड़ी मिलाएँ।</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_athletesetu._udp</string>
+	</array>
+	<key>UIFileSharingEnabled</key>
+	<false/>
+</dict>
+</plist>
