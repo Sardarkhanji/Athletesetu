@@ -50,6 +50,9 @@ class Athlete {
 
   bool get isMinor => age < 18;
 
+  /// Age used for age-group test rules (ruling C30: computed at registration).
+  int get ageAtRegistration => ageOn(createdAt);
+
   Map<String, Object?> toRow() => {
         'id': id,
         'name': name,

@@ -178,6 +178,17 @@ enum SaiTest {
     return value.toStringAsFixed(decimals);
   }
 
+  /// Test window for an athlete of [ageYears].
+  ///
+  /// Sit-ups: 30 s under 12, 45 s for 12 and over (Concept Note §5.9; ruling
+  /// C30: a 12-year-old follows the 12+ rules, age taken at registration).
+  /// Unknown age defaults to 45 s, the KHOJ handbook (Oct 2026) duration.
+  int? durationSecForAge(int? ageYears) {
+    if (this != SaiTest.sitUps) return durationSec;
+    if (ageYears == null) return 45;
+    return ageYears < 12 ? 30 : 45;
+  }
+
   /// Picks the better of two scores according to the test's direction.
   bool isBetter(double candidate, double incumbent) =>
       higherIsBetter ? candidate > incumbent : candidate < incumbent;

@@ -17,10 +17,18 @@ class SessionConfig {
     this.athleteHeightCm,
     this.enduranceLaps = 4,
     this.useRemoteStart = false,
+    this.durationSec,
+    this.waitForGo = false,
   });
   final double? athleteHeightCm;
   final int enduranceLaps;
   final bool useRemoteStart;
+
+  /// Fixed-window tests (sit-ups): the age-group window; null = the test default.
+  final int? durationSec;
+
+  /// Sit-ups: hold the timer until the assessor's "Go" ([SitUpSession.startAt]).
+  final bool waitForGo;
 }
 
 abstract final class EngineRegistry {
@@ -29,7 +37,10 @@ abstract final class EngineRegistry {
   /// Creates the measurement state machine for a pose/video test.
   static MeasurementSession createSession(SaiTest test, CalibrationResult cal, SessionConfig cfg) =>
       switch (test.engine) {
-        EngineKind.poseFsm => SitUpSession(durationSec: test.durationSec),
+        EngineKind.poseFsm => SitUpSession(
+            durationSec: cfg.durationSec ?? test.durationSec,
+            waitForGo: cfg.waitForGo,
+          ),
         EngineKind.jumpReach => createJumpReachSession(test, cal, athleteHeightCm: cfg.athleteHeightCm),
         EngineKind.timingGate => TimingGateSession(
             test: test,
@@ -43,10 +54,10 @@ abstract final class EngineRegistry {
       };
 
   /// A fresh simulator with a random seed (each attempt differs).
-  static FrameSimulator createSimulator(SaiTest test, {int? seed, int enduranceLaps = 4}) {
+  static FrameSimulator createSimulator(SaiTest test, {int? seed, int enduranceLaps = 4, int? durationSec}) {
     final s = seed ?? math.Random().nextInt(1 << 30);
     return switch (test) {
-      SaiTest.sitUps => SitUpSimulator(seed: s),
+      SaiTest.sitUps => SitUpSimulator(seed: s, durationSec: durationSec),
       SaiTest.height || SaiTest.verticalJump || SaiTest.broadJump || SaiTest.sitAndReach =>
         JumpReachSimulator(test, seed: s),
       SaiTest.sprint30m || SaiTest.shuttleRun || SaiTest.enduranceRun =>

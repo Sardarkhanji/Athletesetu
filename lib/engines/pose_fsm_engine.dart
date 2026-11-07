@@ -78,11 +78,30 @@ class SitUpRep {
 }
 
 class SitUpSession implements MeasurementSession {
-  SitUpSession({this.thresholds = const SitUpThresholds(), int? durationSec})
-      : durationMs = (durationSec ?? SaiTest.sitUps.durationSec!) * 1000.0;
+  SitUpSession({
+    this.thresholds = const SitUpThresholds(),
+    int? durationSec,
+    this.waitForGo = false,
+  }) : durationMs = (durationSec ?? SaiTest.sitUps.durationSec!) * 1000.0;
 
   final SitUpThresholds thresholds;
   final double durationMs;
+
+  /// When true, nothing is counted and the timer does not run until [startAt]
+  /// is called on the assessor's "Go" (SAI: the watch starts on the word "go").
+  /// When false (simulation), the timer starts on the first confident frame.
+  final bool waitForGo;
+
+  /// Time of "Go" on the frame clock ([PoseFrame.tMs]), once given.
+  double? get goMs => _goMs;
+  double? _goMs;
+
+  /// Starts the test window at [tMs] (same clock as [PoseFrame.tMs]).
+  void startAt(double tMs) {
+    if (_goMs != null || _complete) return;
+    _goMs = tMs;
+    _startMs = tMs;
+  }
 
   @override
   SaiTest get test => SaiTest.sitUps;
@@ -114,6 +133,16 @@ class SitUpSession implements MeasurementSession {
   EngineSnapshot process(PoseFrame f) {
     _lastT = f.tMs;
     if (_complete) return _snapshot(f, const []);
+    // Before "Go" (and for frames captured before it), only show the countdown state.
+    if (waitForGo && (_goMs == null || f.tMs < _goMs!)) {
+      return _snapshot(f, const [], waiting: true);
+    }
+    // The window is a fixed clock: it must close on time even if tracking drops out.
+    if (_startMs != null && f.tMs - _startMs! >= durationMs) {
+      _closeOpenRep(f.tMs, timeUp: true);
+      _complete = true;
+      return _snapshot(f, const []);
+    }
     _frames++;
 
     final s = f.nearSide;
@@ -128,14 +157,8 @@ class SitUpSession implements MeasurementSession {
       return _snapshot(f, const []); // hold the state through a dropout
     }
 
-    // Timer starts when the athlete is first seen lying flat.
+    // Without "Go", the timer starts when the athlete is first seen clearly.
     _startMs ??= f.tMs;
-    final elapsed = f.tMs - _startMs!;
-    if (elapsed >= durationMs) {
-      _closeOpenRep(f.tMs, timeUp: true);
-      _complete = true;
-      return _snapshot(f, const []);
-    }
 
     final v = shoulder.p - hip.p;
     final torsoRaw = math.atan2(-v.y, v.x.abs()) * 180 / math.pi;
@@ -224,7 +247,7 @@ class SitUpSession implements MeasurementSession {
     _current = null;
   }
 
-  EngineSnapshot _snapshot(PoseFrame f, List<HudPrimitive> overlay) {
+  EngineSnapshot _snapshot(PoseFrame f, List<HudPrimitive> overlay, {bool waiting = false}) {
     final elapsed = _startMs == null ? 0.0 : (f.tMs - _startMs!).clamp(0.0, durationMs);
     final left = ((durationMs - elapsed) / 1000).ceil();
     final phase = switch (_state) {
@@ -234,7 +257,11 @@ class SitUpSession implements MeasurementSession {
       SitUpState.descending => 'phase_descending',
     };
     return EngineSnapshot(
-      phaseKey: _complete ? 'phase_finished' : phase,
+      phaseKey: _complete
+          ? 'phase_finished'
+          : waiting
+              ? 'phase_wait_go'
+              : phase,
       primary: '$validReps',
       primaryLabelKey: 'wb_valid_reps',
       secondary: '${left}s',
@@ -294,8 +321,9 @@ class _SimRep {
 }
 
 class SitUpSimulator extends FrameSimulator {
-  SitUpSimulator({int seed = 42, this.statureM = 1.55})
-      : _noise = SimNoise(seed),
+  SitUpSimulator({int seed = 42, this.statureM = 1.55, int? durationSec})
+      : _testMs = (durationSec ?? SaiTest.sitUps.durationSec!) * 1000.0,
+        _noise = SimNoise(seed),
         _rig = SideRig(statureM) {
     _cam = SimCamera(width: 720, height: 1280, focalPx: 1150, position: (0.15, 0.45, -2.6));
     _plan();
@@ -309,7 +337,7 @@ class SitUpSimulator extends FrameSimulator {
   int _expectedValid = 0;
 
   static const _leadInMs = 1200.0;
-  final double _testMs = SaiTest.sitUps.durationSec! * 1000.0;
+  final double _testMs;
 
   @override
   SaiTest get test => SaiTest.sitUps;

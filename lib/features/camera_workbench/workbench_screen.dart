@@ -8,6 +8,7 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/audio/beep.dart';
 import '../../core/database/repository.dart';
 import '../../core/domain/entities.dart';
 import '../../core/domain/sai_test.dart';
@@ -20,6 +21,7 @@ import '../../engines/assisted_ocr_engine.dart';
 import '../../engines/calibration_engine.dart';
 import '../../engines/engine_registry.dart';
 import '../../engines/isolate_runner.dart';
+import '../../engines/pose_fsm_engine.dart';
 import '../../engines/pose_types.dart';
 import '../../engines/timing_gate_engine.dart';
 import 'camera_pipeline.dart';
@@ -76,6 +78,13 @@ class _WorkbenchScreenState extends ConsumerState<WorkbenchScreen> with SingleTi
   final _thumbs = <int, GrayThumb>{};
   bool _finishing = false;
 
+  // Sit-ups "3-2-1-Go": the countdown digit or 'go' shown over the preview.
+  final _countdown = ValueNotifier<String?>(null);
+  Timer? _goEndTimer;
+
+  /// Age-group window for fixed-duration tests (sit-ups 30 s / 45 s).
+  int? get _windowSec => test.durationSecForAge(_athlete?.ageAtRegistration);
+
   // 2-phone gate
   ClockSyncEngine? _sync;
   GateRole _role = GateRole.finish;
@@ -102,6 +111,8 @@ class _WorkbenchScreenState extends ConsumerState<WorkbenchScreen> with SingleTi
     _activeLevel?.dispose();
     _remoteStartSub?.cancel();
     _simStartTimer?.cancel();
+    _goEndTimer?.cancel();
+    _countdown.dispose();
     _sync?.dispose();
     _pipeline?.dispose();
     _hud.dispose();
@@ -185,7 +196,7 @@ class _WorkbenchScreenState extends ConsumerState<WorkbenchScreen> with SingleTi
     _replaceLevelMonitor(monitor);
 
     if (_simulated) {
-      _sim = EngineRegistry.createSimulator(test);
+      _sim = EngineRegistry.createSimulator(test, durationSec: _windowSec);
       _frameSize = Size(_sim!.width, _sim!.height);
       _gateLines = _isGateTest ? (_sim as GateSimulator).gateLinesX : const [];
       _pushIdleHud();
@@ -314,7 +325,7 @@ class _WorkbenchScreenState extends ConsumerState<WorkbenchScreen> with SingleTi
     _startSent = false;
     if (_simulated) {
       // Fresh simulated athlete each attempt (re-calibrated: marker placement can depend on stature).
-      _sim = EngineRegistry.createSimulator(test);
+      _sim = EngineRegistry.createSimulator(test, durationSec: _windowSec);
       if (test.calibration != CalibrationKind.none) {
         cal = EngineRegistry.simulatedCalibration(_sim!, level: _activeLevel?.last);
         _cal = cal;
@@ -324,7 +335,13 @@ class _WorkbenchScreenState extends ConsumerState<WorkbenchScreen> with SingleTi
     _session = EngineRegistry.createSession(
       test,
       cal,
-      SessionConfig(athleteHeightCm: athleteHeight, useRemoteStart: _twoPhoneFinish),
+      SessionConfig(
+        athleteHeightCm: athleteHeight,
+        useRemoteStart: _twoPhoneFinish,
+        durationSec: _windowSec,
+        // Live sit-ups: the timer starts on the assessor's GO beep, not on first sight.
+        waitForGo: !_simulated && test == SaiTest.sitUps,
+      ),
     );
     _snap.value = EngineSnapshot.idle;
     setState(() => _stage = _Stage.recording);
@@ -354,7 +371,34 @@ class _WorkbenchScreenState extends ConsumerState<WorkbenchScreen> with SingleTi
       } catch (e) {
         debugPrint('Recording unavailable, analysing stream only: $e');
       }
+      final session = _session;
+      if (session is SitUpSession && session.waitForGo) unawaited(_runGoCountdown(session));
     }
+  }
+
+  /// "3-2-1-Go" with beeps. The sit-up window starts at the GO beep; the video is
+  /// already recording, so the countdown and the beep are in the audit video too.
+  Future<void> _runGoCountdown(SitUpSession session) async {
+    bool stillLive() => mounted && !_finishing && identical(_session, session);
+    for (final n in const ['3', '2', '1']) {
+      if (!stillLive()) return;
+      _countdown.value = n;
+      unawaited(Beep.tick());
+      await Future<void>.delayed(const Duration(seconds: 1));
+    }
+    if (!stillLive()) return;
+    final goMs = MonotonicClock.nowMs();
+    session.startAt(goMs);
+    _countdown.value = 'go';
+    unawaited(Beep.go());
+    CameraPipeline.log('sit-ups GO at ${goMs.toStringAsFixed(0)} ms, window ${session.durationMs ~/ 1000} s');
+    // Safety net: close the window on time even if camera frames stall.
+    _goEndTimer?.cancel();
+    _goEndTimer = Timer(Duration(milliseconds: session.durationMs.round() + 500), () {
+      if (stillLive()) _finishAttempt();
+    });
+    await Future<void>.delayed(const Duration(milliseconds: 900));
+    if (mounted && _countdown.value == 'go') _countdown.value = null;
   }
 
   void _onTick(Duration elapsed) {
@@ -441,6 +485,8 @@ class _WorkbenchScreenState extends ConsumerState<WorkbenchScreen> with SingleTi
     _finishing = true;
     _ticker.stop();
     _simStartTimer?.cancel();
+    _goEndTimer?.cancel();
+    _countdown.value = null;
     setState(() => _stage = _Stage.analysing);
 
     XFile? video;
@@ -723,6 +769,29 @@ class _WorkbenchScreenState extends ConsumerState<WorkbenchScreen> with SingleTi
                   children: [
                     if (showCamera) CameraPreview(controller),
                     CustomPaint(painter: HudPainter(_hud)),
+                    IgnorePointer(
+                      child: ValueListenableBuilder<String?>(
+                        valueListenable: _countdown,
+                        builder: (_, v, _) => v == null
+                            ? const SizedBox.shrink()
+                            : Center(
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 12),
+                                  decoration: BoxDecoration(
+                                    color: Colors.black.withValues(alpha: 0.6),
+                                    borderRadius: BorderRadius.circular(AppSpace.radius),
+                                  ),
+                                  child: Text(
+                                    v == 'go' ? l.t('wb_go') : v,
+                                    style: AppText.metricXL.copyWith(
+                                      color: v == 'go' ? AppColors.pass : Colors.white,
+                                      fontSize: 96,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                      ),
+                    ),
                   ],
                 ),
               ),

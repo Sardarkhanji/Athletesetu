@@ -198,6 +198,7 @@ const Map<String, List<String>> kStrings = {
   'wb_all_attempts_done': ['All attempts complete', 'सभी प्रयास पूर्ण'],
   'wb_fouls': ['Fouls: {n}', 'फ़ाउल: {n}'],
   'wb_valid_reps': ['Valid reps', 'मान्य दोहराव'],
+  'wb_go': ['GO!', 'शुरू!'],
   'wb_time_left': ['Time left', 'शेष समय'],
   'wb_permission_denied': [
     'Camera permission denied. Grant it in Settings or use Demo Simulation Mode.',
@@ -327,10 +328,12 @@ const Map<String, List<String>> kStrings = {
     'Both 10 m lines in frame, or pair a second phone at the turn line. A foot must touch each line.',
     'दोनों 10 मी. रेखाएँ फ़्रेम में हों, या टर्न रेखा पर दूसरा फ़ोन जोड़ें। हर रेखा को पैर से छूना आवश्यक।'
   ],
-  'test_sit_ups_name': ['Sit-Ups (30 s)', 'सिट-अप्स (30 से.)'],
+  'test_sit_ups_name': ['Sit-Ups (30 s / 45 s)', 'सिट-अप्स (30 / 45 से.)'],
   'test_sit_ups_setup': [
-    'Side view, knees bent, hands locked behind neck. Elbows must touch knees; back must return flat.',
-    'साइड व्यू, घुटने मुड़े, हाथ गर्दन के पीछे। कोहनी घुटनों को छुए; पीठ पूरी तरह ज़मीन पर लौटे।'
+    'Side view, knees bent, hands locked behind neck. Elbows must touch knees; back must return flat. '
+        '30 s under 12, 45 s for 12+. Timer starts on the GO beep.',
+    'साइड व्यू, घुटने मुड़े, हाथ गर्दन के पीछे। कोहनी घुटनों को छुए; पीठ पूरी तरह ज़मीन पर लौटे। '
+        '12 से कम: 30 से., 12+: 45 से.। टाइमर GO बीप पर शुरू होता है।'
   ],
   'test_endurance_run_name': ['Endurance Run', 'एंड्योरेंस रन'],
   'test_endurance_run_setup': [
@@ -354,6 +357,7 @@ const Map<String, List<String>> kStrings = {
   'phase_running': ['Running', 'दौड़ रहा है'],
   'phase_finished': ['Finished', 'समाप्त'],
   'phase_flat_back': ['Flat back', 'पीठ समतल'],
+  'phase_wait_go': ['Lie flat · wait for GO', 'समतल लेटें · GO की प्रतीक्षा करें'],
   'phase_ascending': ['Ascending', 'ऊपर उठ रहा है'],
   'phase_peak': ['Elbows to knees', 'कोहनी घुटनों तक'],
   'phase_descending': ['Descending', 'नीचे आ रहा है'],

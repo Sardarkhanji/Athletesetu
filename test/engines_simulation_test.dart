@@ -5,6 +5,7 @@ import 'package:athlete_setu/core/domain/sai_test.dart';
 import 'package:athlete_setu/engines/assisted_ocr_engine.dart';
 import 'package:athlete_setu/engines/calibration_engine.dart';
 import 'package:athlete_setu/engines/engine_registry.dart';
+import 'package:athlete_setu/engines/pose_fsm_engine.dart';
 import 'package:athlete_setu/engines/pose_types.dart';
 import 'package:athlete_setu/engines/timing_gate_engine.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -99,6 +100,51 @@ void main() {
       matched += t - (o.value!.round() - t).abs();
     }
     expect(matched / expected, greaterThanOrEqualTo(0.95));
+  });
+
+  test('sit-up window by age (30 s under 12, 45 s for 12+)', () {
+    expect(SaiTest.sitUps.durationSecForAge(11), 30);
+    expect(SaiTest.sitUps.durationSecForAge(12), 45);
+    expect(SaiTest.sitUps.durationSecForAge(17), 45);
+    expect(SaiTest.sitUps.durationSecForAge(null), 45);
+    expect(SaiTest.height.durationSecForAge(10), isNull);
+  });
+
+  test('sit-ups wait for GO: nothing counts before startAt', () {
+    final sim = EngineRegistry.createSimulator(SaiTest.sitUps, seed: 3);
+    final cal = EngineRegistry.simulatedCalibration(sim);
+    final session = EngineRegistry.createSession(
+      SaiTest.sitUps,
+      cal,
+      const SessionConfig(waitForGo: true),
+    ) as SitUpSession;
+    final dt = 1000 / sim.fps;
+    var i = 0;
+    for (var t = 0.0; t <= sim.durationMs; t += dt) {
+      session.process(sim.frameAt(t, i++));
+    }
+    expect(session.isComplete, isFalse);
+    expect(session.finalize().value, isNull);
+  });
+
+  test('sit-ups 45 s window counts more reps than 30 s', () {
+    int countFor(int sec) {
+      final sim = EngineRegistry.createSimulator(SaiTest.sitUps, seed: 2, durationSec: sec);
+      final cal = EngineRegistry.simulatedCalibration(sim);
+      final session = EngineRegistry.createSession(SaiTest.sitUps, cal, SessionConfig(durationSec: sec));
+      final dt = 1000 / sim.fps;
+      var i = 0;
+      for (var t = 0.0; t <= sim.durationMs && !session.isComplete; t += dt) {
+        session.process(sim.frameAt(t, i++));
+      }
+      final o = session.finalize();
+      expect(o.metadata['durationSec'], sec.toDouble());
+      final truth = sim.groundTruth['expectedValidReps'] as int;
+      expect((o.value!.round() - truth).abs(), lessThanOrEqualTo(1));
+      return o.value!.round();
+    }
+
+    expect(countFor(45), greaterThan(countFor(30)));
   });
 
   test('sprint / shuttle / endurance timing', () {
