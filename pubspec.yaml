@@ -35,6 +35,11 @@ dependencies:
   flutter_riverpod: ^2.6.1
   go_router: ^17.5.0
   camera: ^0.12.0+2
+  # Android: use the Camera2 implementation instead of the default CameraX one.
+  # CameraX switches to a shared-stream mode when preview + image stream + video
+  # recording run together, which rotated the preview and the analysis frames on
+  # Moto g45 and Xiaomi 11i. Camera2 feeds the three surfaces directly.
+  camera_android: ^0.10.10
   sensors_plus: ^7.1.1
   tflite_flutter: ^0.12.1
   sqflite_sqlcipher: ^3.4.1
