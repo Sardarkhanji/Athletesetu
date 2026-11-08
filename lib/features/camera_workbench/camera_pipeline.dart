@@ -29,6 +29,7 @@ class CameraPipeline {
   int _received = 0, _dropped = 0, _processed = 0;
   double _inferSum = 0, _poseSum = 0, _convSum = 0, _invokeSum = 0, _kpSum = 0, _lastStatMs = 0;
   bool _formatLogged = false;
+  bool _rotationFixLogged = false;
 
   static void log(String msg) => debugPrint('[AthleteSetu] $msg');
 
@@ -146,6 +147,7 @@ class CameraPipeline {
     _recording = true;
     log('recording started: ${_orientationState(c)}');
     _formatLogged = false; // log the first recording frame's size/format too
+    _rotationFixLogged = false;
   }
 
   /// Diagnostics for preview rotation during recording (Moto g45 report).
@@ -196,6 +198,20 @@ class CameraPipeline {
       _dropped++;
       return; // back-pressure: drop
     }
+    // Some phones (seen on Moto g45) hand over analysis buffers that are already
+    // upright once video recording starts. Rotating those again turns the athlete
+    // sideways for the pose model (keypoint scores collapse to ~0.2). Pick the
+    // rotation whose output has the orientation this test expects.
+    var rotation = _frameRotationDeg;
+    final outPortrait = rotation % 180 == 0 ? image.height > image.width : image.width > image.height;
+    if (outPortrait == _landscape) {
+      rotation = (rotation + 270) % 360;
+      if (!_rotationFixLogged) {
+        _rotationFixLogged = true;
+        log('buffer ${image.width}x${image.height} already rotated${_recording ? ' (REC)' : ''}: '
+            'using rotation $rotation° instead of $_frameRotationDeg°');
+      }
+    }
     final data = CameraFrameData(
       width: image.width,
       height: image.height,
@@ -203,7 +219,7 @@ class CameraPipeline {
       rowStrides: [for (final pl in image.planes) pl.bytesPerRow],
       pixelStrides: [for (final pl in image.planes) pl.bytesPerPixel ?? 1],
       isBgra: image.format.group == ImageFormatGroup.bgra8888,
-      rotationDeg: _frameRotationDeg,
+      rotationDeg: rotation,
       tMs: t,
       index: _index++,
       mirror: _description?.lensDirection == CameraLensDirection.front,
