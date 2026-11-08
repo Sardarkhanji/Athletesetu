@@ -66,6 +66,9 @@ class _WorkbenchScreenState extends ConsumerState<WorkbenchScreen> with SingleTi
   List<double> _gateLines = const [];
   bool _wantMarkers = false;
   Completer<List<List<Vec2>>>? _markerWait;
+  // Marker detections gathered during one calibration (averaged for stability).
+  final _markerSamples = <List<List<Vec2>>>[];
+  static const _markerSamplesWanted = 5;
 
   // Attempt
   MeasurementSession? _session;
@@ -286,6 +289,20 @@ class _WorkbenchScreenState extends ConsumerState<WorkbenchScreen> with SingleTi
     if (test.calibration == CalibrationKind.none && _stage == _Stage.calibrate) await _calibrate();
   }
 
+  /// Corner-by-corner mean of the gathered detections (empty if none).
+  List<List<Vec2>> _averagedMarkers() {
+    if (_markerSamples.isEmpty) return const [];
+    final n = _markerSamples.first.length;
+    final usable = _markerSamples.where((s) => s.length == n).toList();
+    return [
+      for (var m = 0; m < n; m++)
+        [
+          for (var c = 0; c < 4; c++)
+            usable.map((s) => s[m][c]).reduce((a, b) => a + b) / usable.length.toDouble(),
+        ],
+    ];
+  }
+
   LevelMonitor? _activeLevel;
   void _replaceLevelMonitor(LevelMonitor m) {
     _activeLevel?.dispose();
@@ -356,10 +373,15 @@ class _WorkbenchScreenState extends ConsumerState<WorkbenchScreen> with SingleTi
           case CalibrationKind.none:
             cal = EngineRegistry.calibration.none(imageWidth: size.width, imageHeight: size.height);
           default:
+            _markerSamples.clear();
             _markerWait = Completer();
             _wantMarkers = true;
-            final markers = await _markerWait!.future.timeout(const Duration(seconds: 4), onTimeout: () => const []);
+            // Frames already in flight were requested without marker search, so
+            // empty results are ignored; on timeout use whatever was gathered.
+            final markers = await _markerWait!.future
+                .timeout(const Duration(seconds: 4), onTimeout: _averagedMarkers);
             _wantMarkers = false;
+            CameraPipeline.log('marker detections used: ${_markerSamples.length}, markers: ${markers.length}');
             CameraPipeline.log('calibrating with marker side ${_markerSizeCm.toStringAsFixed(1)} cm');
             cal = CalibrationEngine(markerSizeCm: _markerSizeCm).fromMarkers(
               kind: test.calibration,
@@ -523,8 +545,10 @@ class _WorkbenchScreenState extends ConsumerState<WorkbenchScreen> with SingleTi
   void _onCameraResult(IsolateResult r) {
     if (!mounted || _simulated) return;
     _frameSize ??= Size(r.frame.width, r.frame.height);
-    if (_wantMarkers && _markerWait != null && !_markerWait!.isCompleted) {
-      _markerWait!.complete(r.markers);
+    if (_wantMarkers && _markerWait != null && !_markerWait!.isCompleted && r.markers.isNotEmpty) {
+      final needed = test.calibration == CalibrationKind.floorMarkers ? 2 : 1;
+      if (r.markers.length >= needed) _markerSamples.add(r.markers.take(needed).toList());
+      if (_markerSamples.length >= _markerSamplesWanted) _markerWait!.complete(_averagedMarkers());
     }
     if (r.thumb != null && test == SaiTest.medicineBall) {
       _thumbs[r.frame.index] = GrayThumb(r.thumb!, r.thumbWidth, r.thumbHeight);

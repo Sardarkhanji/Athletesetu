@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 // Headless accuracy checks: every simulator is driven through its real engine
 // and the measured value is compared with the simulator's ground truth.
 
@@ -116,6 +118,21 @@ void main() {
     // A 5° tilt reads as 5° in either orientation.
     final r = LevelReading.fromAccelerometer(9.8 * 0.99619, -9.8 * 0.08716, 0, landscape: true);
     expect(r.rollDeg.abs(), closeTo(5, 0.05));
+  });
+
+  test('marker detector measures a square edge-to-edge (no 1-pixel shrink)', () {
+    const w = 400, h = 400, x0 = 150, side = 100;
+    final gray = Uint8List(w * h)..fillRange(0, w * h, 220);
+    for (var y = x0; y < x0 + side; y++) {
+      for (var x = x0; x < x0 + side; x++) {
+        gray[y * w + x] = 20;
+      }
+    }
+    final quads = detectSquareMarkers(gray, w, h, maxMarkers: 1);
+    expect(quads, hasLength(1));
+    final q = quads.first;
+    final mean = [for (var i = 0; i < 4; i++) q[i].distanceTo(q[(i + 1) % 4])].reduce((a, b) => a + b) / 4;
+    expect(mean, closeTo(side, 0.6));
   });
 
   test('sit-ups wait for GO: nothing counts before startAt', () {

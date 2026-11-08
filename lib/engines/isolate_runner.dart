@@ -338,7 +338,8 @@ void _isolateMain(SendPort out) {
 
           var markers = <List<Vec2>>[];
           if (msg['markers'] == true) {
-            final mw = math.min(360, sampler.outW);
+            // Full resolution (up to 720 px wide): corner error is 1/2 of a 360 px search.
+            final mw = math.min(720, sampler.outW);
             final mh = (sampler.outH * mw / sampler.outW).round();
             final gray = sampler.grayThumb(mw, mh);
             final ms = sampler.outW / mw;

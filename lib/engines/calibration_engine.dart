@@ -431,7 +431,12 @@ List<List<Vec2>> detectSquareMarkers(Uint8List gray, int w, int h, {int maxMarke
     final aspect = sideA / math.max(sideB, 1);
     // Squares viewed obliquely become trapezoids: accept moderate aspect.
     if (fill < 0.82 || fill > 1.2 || aspect < 0.25 || aspect > 4) continue;
-    found.add((area, quad));
+    // The extreme pixels are pixel centres, so the raw quad is about one pixel
+    // too small (a systematic over-read of every measurement). Scale it about
+    // its centre until its area equals the counted dark area.
+    final c = (quad[0] + quad[1] + quad[2] + quad[3]) / 4;
+    final k = math.sqrt(area / quadArea);
+    found.add((area, [for (final p in quad) c + (p - c) * k]));
   }
   found.sort((a, b) => b.$1.compareTo(a.$1));
   final top = found.take(maxMarkers).map((e) => e.$2).toList()
