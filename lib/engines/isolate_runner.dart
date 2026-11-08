@@ -523,6 +523,23 @@ class _Sampler {
 (Vec2?, Vec2?) _silhouette(Uint8List cur, Uint8List bg, int w, int h, List<Keypoint> kps, double scale) {
   final good = kps.where((k) => k.score > 0.3).toList();
   if (good.length < 5) return (null, null);
+  if (cur.length != bg.length || cur.length != w * h) return (null, null);
+  // Auto-exposure shifts the whole frame between the empty-wall background and
+  // now (e.g. when an athlete in dark clothes steps in, or recording starts).
+  // Remove that global offset (median difference) before thresholding.
+  final hist = List<int>.filled(511, 0);
+  for (var i = 0; i < cur.length; i += 3) {
+    hist[cur[i] - bg[i] + 255]++;
+  }
+  var acc = 0, offset = 0;
+  final half0 = (cur.length / 3) / 2;
+  for (var d = 0; d < 511; d++) {
+    acc += hist[d];
+    if (acc >= half0) {
+      offset = d - 255;
+      break;
+    }
+  }
   final cx = mean(good.map((k) => k.p.x)) / scale;
   final xs = good.map((k) => k.p.x / scale).toList()..sort();
   final half = math.max((xs.last - xs.first) / 2 + 2, w * 0.06);
@@ -530,7 +547,7 @@ class _Sampler {
   bool rowHit(int y) {
     var n = 0;
     for (var x = x0; x <= x1; x++) {
-      if ((cur[y * w + x] - bg[y * w + x]).abs() > 28) n++;
+      if ((cur[y * w + x] - bg[y * w + x] - offset).abs() > 28) n++;
       if (n >= 2) return true;
     }
     return false;
@@ -550,6 +567,8 @@ class _Sampler {
     }
   }
   if (top == null || bottom == null || bottom - top < h * 0.2) return (null, null);
+  // A "person" touching both frame edges is a lighting change, not a person.
+  if (top <= 1 && bottom >= h - 2) return (null, null);
   return (Vec2(cx * scale, (top + 0.5) * scale), Vec2(cx * scale, (bottom + 0.5) * scale));
 }
 

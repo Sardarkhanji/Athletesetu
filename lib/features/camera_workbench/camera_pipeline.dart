@@ -141,9 +141,18 @@ class CameraPipeline {
     if (c == null || _recording) return;
     await stopStreaming();
     await c.prepareForVideoRecording();
+    log('before rec: ${_orientationState(c)}');
     await c.startVideoRecording(onAvailable: _onImage);
     _recording = true;
-    log('recording started');
+    log('recording started: ${_orientationState(c)}');
+    _formatLogged = false; // log the first recording frame's size/format too
+  }
+
+  /// Diagnostics for preview rotation during recording (Moto g45 report).
+  String _orientationState(CameraController c) {
+    final v = c.value;
+    return 'device=${v.deviceOrientation.name} locked=${v.lockedCaptureOrientation?.name} '
+        'recording=${v.recordingOrientation?.name} previewSize=${v.previewSize} aspect=${v.aspectRatio.toStringAsFixed(3)}';
   }
 
   Future<XFile?> stopRecording() async {

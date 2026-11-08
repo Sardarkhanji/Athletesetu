@@ -23,17 +23,41 @@ import 'pose_types.dart';
 // Shared helpers
 // ---------------------------------------------------------------------------
 
-/// Head vertex: silhouette top if available, else extrapolated from eyes/shoulders.
+/// The silhouette top is used only if it sits where a head top can be:
+/// above the eyes, by at most ~1.3× the eye-to-shoulder distance.
+/// Anything else (e.g. a lighting change filling the frame) is ignored.
+bool silhouetteTopPlausible(PoseFrame f) {
+  final t = f.silhouetteTop;
+  if (t == null) return false;
+  final eye = f.midpoint(KP.leftEye, KP.rightEye);
+  final sh = f.midpoint(KP.leftShoulder, KP.rightShoulder);
+  final unit = sh.y - eye.y;
+  if (unit <= 0) return false;
+  return t.y < eye.y && t.y > eye.y - 1.3 * unit;
+}
+
+/// The silhouette bottom is used only if it is at or just below the ankles
+/// (within 0.6× the shin length).
+bool silhouetteBottomPlausible(PoseFrame f) {
+  final b = f.silhouetteBottom;
+  if (b == null) return false;
+  final s = f[KP.leftAnkle].p.y >= f[KP.rightAnkle].p.y ? 0 : 1;
+  final ankle = f.side(s, KP.leftAnkle).p, knee = f.side(s, KP.leftKnee).p;
+  final shin = ankle.distanceTo(knee);
+  return b.y > ankle.y - 0.1 * shin && b.y < ankle.y + 0.6 * shin;
+}
+
+/// Head vertex: silhouette top if plausible, else extrapolated from eyes/shoulders.
 Vec2 estimateVertex(PoseFrame f) {
-  if (f.silhouetteTop != null) return f.silhouetteTop!;
+  if (silhouetteTopPlausible(f)) return f.silhouetteTop!;
   final eye = f.midpoint(KP.leftEye, KP.rightEye);
   final sh = f.midpoint(KP.leftShoulder, KP.rightShoulder);
   return Vec2(eye.x, eye.y - 0.545 * (sh.y - eye.y));
 }
 
-/// Heel baseline: silhouette bottom if available, else below the lower ankle.
+/// Heel baseline: silhouette bottom if plausible, else below the lower ankle.
 Vec2 estimateHeel(PoseFrame f) {
-  if (f.silhouetteBottom != null) return f.silhouetteBottom!;
+  if (silhouetteBottomPlausible(f)) return f.silhouetteBottom!;
   final s = f[KP.leftAnkle].p.y >= f[KP.rightAnkle].p.y ? 0 : 1;
   final ankle = f.side(s, KP.leftAnkle).p, knee = f.side(s, KP.leftKnee).p;
   return Vec2(ankle.x, ankle.y + 0.16 * ankle.distanceTo(knee));
@@ -76,7 +100,7 @@ class HeightSession implements MeasurementSession {
 
     _vertex = estimateVertex(f);
     _heel = estimateHeel(f);
-    _usedSilhouette = f.silhouetteTop != null;
+    _usedSilhouette = silhouetteTopPlausible(f);
     final hCm = cal.toPlaneCm(_vertex!).y - cal.toPlaneCm(_heel!).y;
 
     if (spreadCm < 1.2) {
