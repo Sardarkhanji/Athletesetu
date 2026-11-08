@@ -62,3 +62,7 @@ key.properties
 
 # Gradle build output
 /android/build/
+
+# Weight OCR benchmark photos (third-party images: never commit)
+/test_data/weight/*
+!/test_data/weight/README.md
