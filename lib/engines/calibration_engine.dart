@@ -236,8 +236,10 @@ class LevelReading {
       requirePitch ? math.max(rollDeg.abs(), pitchDeg.abs()) : rollDeg.abs();
 
   /// Phone upright in portrait: gravity along +y. Roll = rotation in the screen plane.
-  static LevelReading fromAccelerometer(double x, double y, double z) {
-    final roll = math.atan2(x, y) * 180 / math.pi;
+  /// [landscape]: phone turned anticlockwise (top to the left), gravity along +x,
+  /// so the screen axes are (-y, x) in device coordinates.
+  static LevelReading fromAccelerometer(double x, double y, double z, {bool landscape = false}) {
+    final roll = (landscape ? math.atan2(-y, x) : math.atan2(x, y)) * 180 / math.pi;
     final pitch = math.atan2(z, math.sqrt(x * x + y * y)) * 180 / math.pi;
     return LevelReading(roll, pitch);
   }
@@ -245,9 +247,12 @@ class LevelReading {
 
 /// Low-pass-filtered tilt from the accelerometer (or a simulated settle).
 class LevelMonitor {
-  LevelMonitor({required this.simulated, int seed = 7}) : _noise = SimNoise(seed);
+  LevelMonitor({required this.simulated, this.landscape = false, int seed = 7}) : _noise = SimNoise(seed);
 
   final bool simulated;
+
+  /// Phone held in landscape (top of the phone to the left).
+  final bool landscape;
   final SimNoise _noise;
   StreamSubscription<AccelerometerEvent>? _sub;
   Timer? _simTimer;
@@ -275,7 +280,7 @@ class LevelMonitor {
         _fx += a * (e.x - _fx);
         _fy += a * (e.y - _fy);
         _fz += a * (e.z - _fz);
-        _emit(LevelReading.fromAccelerometer(_fx, _fy, _fz));
+        _emit(LevelReading.fromAccelerometer(_fx, _fy, _fz, landscape: landscape));
       },
       onError: (_) {}, // No accelerometer: leave the last reading.
       cancelOnError: false,

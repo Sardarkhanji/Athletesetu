@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -101,6 +102,8 @@ class _WorkbenchScreenState extends ConsumerState<WorkbenchScreen> with SingleTi
   void initState() {
     super.initState();
     _ticker = createTicker(_onTick);
+    // Landscape tests turn the whole screen, so preview, overlay and video agree.
+    if (test.landscape) SystemChrome.setPreferredOrientations([DeviceOrientation.landscapeLeft]);
     _init();
   }
 
@@ -118,6 +121,7 @@ class _WorkbenchScreenState extends ConsumerState<WorkbenchScreen> with SingleTi
     _hud.dispose();
     _snap.dispose();
     _levelNow.dispose();
+    if (test.landscape) SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
     super.dispose();
   }
 
@@ -162,7 +166,11 @@ class _WorkbenchScreenState extends ConsumerState<WorkbenchScreen> with SingleTi
     unawaited(ref.read(permissionServiceProvider).request(PermissionGroup.location));
     try {
       final p = CameraPipeline();
-      await p.init(model: model, highFps: test == SaiTest.verticalJump || test == SaiTest.broadJump || test == SaiTest.medicineBall || _isGateTest);
+      await p.init(
+        model: model,
+        highFps: test == SaiTest.verticalJump || test == SaiTest.broadJump || test == SaiTest.medicineBall || _isGateTest,
+        landscape: test.landscape,
+      );
       p.onResult = _onCameraResult;
       p.requestFor = () => FrameRequest(
             wantMarkers: _wantMarkers,
@@ -189,7 +197,9 @@ class _WorkbenchScreenState extends ConsumerState<WorkbenchScreen> with SingleTi
     _session = null;
     _cal = null;
     await _levelSub?.cancel();
-    final monitor = _simulated ? LevelMonitor(simulated: true) : LevelMonitor(simulated: false);
+    final monitor = _simulated
+        ? LevelMonitor(simulated: true)
+        : LevelMonitor(simulated: false, landscape: test.landscape);
     _levelSub = monitor.stream.listen((r) => _levelNow.value = r);
     monitor.start();
     // Keep a handle so it is disposed with the screen.
@@ -643,6 +653,45 @@ class _WorkbenchScreenState extends ConsumerState<WorkbenchScreen> with SingleTi
   @override
   Widget build(BuildContext context) {
     final l = ref.watch(l10nProvider);
+    final simBanner = _simReason != null && _simulated
+        ? Container(
+            width: double.infinity,
+            color: AppColors.warning,
+            padding: const EdgeInsets.symmetric(horizontal: AppSpace.md, vertical: 6),
+            child: Text(
+              l.t(_simReason!, _simReasonParams),
+              style: const TextStyle(color: AppColors.text, fontSize: 12, fontWeight: FontWeight.w600),
+            ),
+          )
+        : null;
+
+    // Landscape tests: camera on the left, controls in a side panel on the right.
+    if (test.landscape && MediaQuery.orientationOf(context) == Orientation.landscape) {
+      return Scaffold(
+        backgroundColor: AppColors.hudBackdrop,
+        body: SafeArea(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(
+                child: Column(
+                  children: [
+                    _header(l),
+                    ?simBanner,
+                    Expanded(child: _viewport(l)),
+                  ],
+                ),
+              ),
+              SizedBox(
+                width: (MediaQuery.sizeOf(context).width * 0.36).clamp(280.0, 380.0),
+                child: _bottomPanel(l, side: true),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
     return Scaffold(
       backgroundColor: AppColors.hudBackdrop,
       body: SafeArea(
@@ -651,16 +700,7 @@ class _WorkbenchScreenState extends ConsumerState<WorkbenchScreen> with SingleTi
           children: [
             const TopStatusBar(dark: true),
             _header(l),
-            if (_simReason != null && _simulated)
-              Container(
-                width: double.infinity,
-                color: AppColors.warning,
-                padding: const EdgeInsets.symmetric(horizontal: AppSpace.md, vertical: 6),
-                child: Text(
-                  l.t(_simReason!, _simReasonParams),
-                  style: const TextStyle(color: AppColors.text, fontSize: 12, fontWeight: FontWeight.w600),
-                ),
-              ),
+            ?simBanner,
             Expanded(
               child: test.needsCamera
                   ? _viewport(l)
@@ -856,15 +896,19 @@ class _WorkbenchScreenState extends ConsumerState<WorkbenchScreen> with SingleTi
         _ => 'loading',
       };
 
-  Widget _bottomPanel(L10n l) {
+  /// Controls panel: along the bottom in portrait, full-height on the right ([side]) in landscape.
+  Widget _bottomPanel(L10n l, {bool side = false}) {
     return Container(
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         color: AppColors.surface,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+        borderRadius: side
+            ? const BorderRadius.horizontal(left: Radius.circular(16))
+            : const BorderRadius.vertical(top: Radius.circular(16)),
       ),
-      constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * 0.46),
+      constraints: side ? null : BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * 0.46),
       child: SafeArea(
-        top: false,
+        top: side,
+        left: false,
         child: SingleChildScrollView(
           padding: const EdgeInsets.fromLTRB(AppSpace.md, AppSpace.md, AppSpace.md, AppSpace.sm),
           child: Column(

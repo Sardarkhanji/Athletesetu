@@ -178,6 +178,11 @@ enum SaiTest {
     return value.toStringAsFixed(decimals);
   }
 
+  /// Camera orientation for this test. Wide or lying-down scenes record in
+  /// landscape (phone turned anticlockwise, top of the phone to the left);
+  /// everything else stays portrait. Rolled out one test at a time.
+  bool get landscape => this == SaiTest.sitUps;
+
   /// Test window for an athlete of [ageYears].
   ///
   /// Sit-ups: 30 s under 12, 45 s for 12 and over (Concept Note §5.9; ruling

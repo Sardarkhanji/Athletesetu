@@ -331,9 +331,11 @@ const Map<String, List<String>> kStrings = {
   'test_sit_ups_name': ['Sit-Ups (30 s / 45 s)', 'सिट-अप्स (30 / 45 से.)'],
   'test_sit_ups_setup': [
     'Side view, knees bent, hands locked behind neck. Elbows must touch knees; back must return flat. '
-        '30 s under 12, 45 s for 12+. Timer starts on the GO beep.',
+        '30 s under 12, 45 s for 12+. Timer starts on the GO beep. '
+        'Hold the phone sideways (landscape, top of the phone to the left).',
     'साइड व्यू, घुटने मुड़े, हाथ गर्दन के पीछे। कोहनी घुटनों को छुए; पीठ पूरी तरह ज़मीन पर लौटे। '
-        '12 से कम: 30 से., 12+: 45 से.। टाइमर GO बीप पर शुरू होता है।'
+        '12 से कम: 30 से., 12+: 45 से.। टाइमर GO बीप पर शुरू होता है। '
+        'फ़ोन को आड़ा रखें (लैंडस्केप, फ़ोन का ऊपरी भाग बाईं ओर)।'
   ],
   'test_endurance_run_name': ['Endurance Run', 'एंड्योरेंस रन'],
   'test_endurance_run_setup': [

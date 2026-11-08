@@ -21,6 +21,10 @@ class CameraPipeline {
   bool _streaming = false;
   bool _recording = false;
 
+  /// Capture locked to landscape (top of the phone to the left) instead of portrait.
+  bool _landscape = false;
+  bool get landscape => _landscape;
+
   // Diagnostics (logged once per second as `[AthleteSetu] cam …`).
   int _received = 0, _dropped = 0, _processed = 0;
   double _inferSum = 0, _poseSum = 0, _convSum = 0, _invokeSum = 0, _kpSum = 0, _lastStatMs = 0;
@@ -56,14 +60,25 @@ class CameraPipeline {
 
   bool get isReady => controller?.value.isInitialized ?? false;
 
-  /// Upright frame size (portrait).
+  /// Upright frame size: portrait (tall) or landscape (wide), as the test asks.
   Size? get uprightSize {
     final s = controller?.value.previewSize;
     if (s == null) return null;
-    return Size(s.shortestSide, s.longestSide);
+    return _landscape ? Size(s.longestSide, s.shortestSide) : Size(s.shortestSide, s.longestSide);
   }
 
-  Future<void> init({required Uint8List model, required bool highFps}) async {
+  /// Clockwise rotation that turns a raw sensor buffer upright for the locked
+  /// orientation. Analysis buffers always arrive in sensor orientation; portrait
+  /// needs the sensor angle (usually 90°), landscape-left needs 90° less.
+  int get _frameRotationDeg {
+    final sensor = _description?.sensorOrientation ?? 90;
+    final display = _landscape ? 90 : 0;
+    final front = _description?.lensDirection == CameraLensDirection.front;
+    return front ? (sensor + display) % 360 : (sensor - display + 360) % 360;
+  }
+
+  Future<void> init({required Uint8List model, required bool highFps, bool landscape = false}) async {
+    _landscape = landscape;
     final cameras = await availableCameras();
     log('cameras: ${cameras.map((c) => '${c.name}/${c.lensDirection.name}/${c.sensorOrientation}°').join(', ')}');
     if (cameras.isEmpty) throw CameraException('no_camera', 'No camera found');
@@ -91,9 +106,12 @@ class CameraPipeline {
       controller = fallback;
     }
     controller ??= c;
-    await controller!.lockCaptureOrientation(DeviceOrientation.portraitUp);
+    await controller!.lockCaptureOrientation(
+      landscape ? DeviceOrientation.landscapeLeft : DeviceOrientation.portraitUp,
+    );
     log('camera ready: ${_description!.name} preview=${controller!.value.previewSize} '
-        'requestedFps=${highFps ? 60 : 30} sensor=${_description!.sensorOrientation}°');
+        'requestedFps=${highFps ? 60 : 30} sensor=${_description!.sensorOrientation}° '
+        '${landscape ? 'LANDSCAPE' : 'PORTRAIT'} frameRotation=$_frameRotationDeg°');
     final sw = Stopwatch()..start();
     final dump = kDebugMode
         ? p.join((await getApplicationDocumentsDirectory()).path, 'debug_model_input.png')
@@ -176,7 +194,7 @@ class CameraPipeline {
       rowStrides: [for (final pl in image.planes) pl.bytesPerRow],
       pixelStrides: [for (final pl in image.planes) pl.bytesPerPixel ?? 1],
       isBgra: image.format.group == ImageFormatGroup.bgra8888,
-      rotationDeg: _description?.sensorOrientation ?? 90,
+      rotationDeg: _frameRotationDeg,
       tMs: t,
       index: _index++,
       mirror: _description?.lensDirection == CameraLensDirection.front,

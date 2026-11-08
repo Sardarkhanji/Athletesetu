@@ -110,6 +110,14 @@ void main() {
     expect(SaiTest.height.durationSecForAge(10), isNull);
   });
 
+  test('level reading: landscape (top to the left) is level when gravity is along +x', () {
+    expect(LevelReading.fromAccelerometer(9.8, 0, 0, landscape: true).rollDeg.abs(), lessThan(0.01));
+    expect(LevelReading.fromAccelerometer(0, 9.8, 0).rollDeg.abs(), lessThan(0.01));
+    // A 5° tilt reads as 5° in either orientation.
+    final r = LevelReading.fromAccelerometer(9.8 * 0.99619, -9.8 * 0.08716, 0, landscape: true);
+    expect(r.rollDeg.abs(), closeTo(5, 0.05));
+  });
+
   test('sit-ups wait for GO: nothing counts before startAt', () {
     final sim = EngineRegistry.createSimulator(SaiTest.sitUps, seed: 3);
     final cal = EngineRegistry.simulatedCalibration(sim);
