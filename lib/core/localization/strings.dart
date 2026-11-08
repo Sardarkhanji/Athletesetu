@@ -290,8 +290,10 @@ const Map<String, List<String>> kStrings = {
   // ---- Test names & setup ----
   'test_height_name': ['Height', 'लंबाई'],
   'test_height_setup': [
-    'Stick the wall marker at 1 m. Athlete stands barefoot, heels to wall. Phone 2 m away at hip height.',
-    'दीवार मार्कर 1 मी. पर लगाएँ। एथलीट नंगे पैर, एड़ियाँ दीवार से सटाकर खड़ा हो। फ़ोन 2 मी. दूर कूल्हे की ऊँचाई पर।'
+    'Stick the wall marker with its bottom edge at 1 m. Phone 2.5 m from the wall, lens 1 m high, level. '
+        'Calibrate with nobody in frame, then the athlete stands barefoot, heels to wall.',
+    'दीवार मार्कर का निचला किनारा 1 मी. पर लगाएँ। फ़ोन दीवार से 2.5 मी. दूर, लेंस 1 मी. ऊँचा, सीधा। '
+        'फ़्रेम खाली रखकर कैलिब्रेट करें, फिर एथलीट नंगे पैर, एड़ियाँ दीवार से सटाकर खड़ा हो।'
   ],
   'test_weight_name': ['Weight & BMI', 'वज़न और BMI'],
   'test_weight_setup': [
@@ -381,4 +383,12 @@ const Map<String, List<String>> kStrings = {
   'cal_fps_low': ['FPS below 30', 'FPS 30 से कम'],
   'cal_res_low': ['Below 720p', '720p से कम'],
   'cal_no_marker': ['Marker not found', 'मार्कर नहीं मिला'],
+  'marker_size_row': ['Marker size: {cm} cm', 'मार्कर आकार: {cm} से.मी.'],
+  'marker_size_edit': ['Change', 'बदलें'],
+  'marker_size_title': ['Printed marker size', 'छपे मार्कर का आकार'],
+  'marker_size_help': [
+    'Measure one side of the black square with a ruler and enter it. Printers often shrink pages slightly.',
+    'काले वर्ग की एक भुजा रूलर से नापकर डालें। प्रिंटर अक्सर पेज थोड़ा छोटा कर देते हैं।'
+  ],
+  'marker_size_range': ['Enter a size between 10 and 40 cm', '10 से 40 से.मी. के बीच आकार डालें'],
 };

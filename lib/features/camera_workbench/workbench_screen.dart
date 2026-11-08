@@ -10,6 +10,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/audio/beep.dart';
+import '../../core/database/app_database.dart';
 import '../../core/database/repository.dart';
 import '../../core/domain/entities.dart';
 import '../../core/domain/sai_test.dart';
@@ -82,6 +83,70 @@ class _WorkbenchScreenState extends ConsumerState<WorkbenchScreen> with SingleTi
   // Sit-ups "3-2-1-Go": the countdown digit or 'go' shown over the preview.
   final _countdown = ValueNotifier<String?>(null);
   Timer? _goEndTimer;
+
+  // Printed marker side as measured with a ruler (printers often scale ~96–98%).
+  static const _markerSizeKey = 'marker_size_cm';
+  static const _markerMinCm = 10.0, _markerMaxCm = 40.0;
+  double get _markerSizeCm {
+    final v = double.tryParse(ref.read(appDatabaseProvider).cachedSetting(_markerSizeKey) ?? '');
+    return v != null && v >= _markerMinCm && v <= _markerMaxCm ? v : 20.0;
+  }
+
+  bool get _usesPrintedMarker =>
+      test.calibration == CalibrationKind.wallMarker ||
+      test.calibration == CalibrationKind.boxScale ||
+      test.calibration == CalibrationKind.floorMarkers;
+
+  Future<void> _editMarkerSize() async {
+    final l = ref.read(l10nProvider);
+    final ctrl = TextEditingController(text: _markerSizeCm.toStringAsFixed(1));
+    String? error;
+    final v = await showDialog<double>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setD) => AlertDialog(
+          title: Text(l.t('marker_size_title')),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(l.t('marker_size_help'), style: const TextStyle(fontSize: 13, color: AppColors.textMuted)),
+              const SizedBox(height: AppSpace.sm),
+              TextField(
+                controller: ctrl,
+                autofocus: true,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
+                style: AppText.metricM,
+                decoration: InputDecoration(suffixText: 'cm', errorText: error),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: Text(l.t('cancel'))),
+            TextButton(
+              onPressed: () {
+                final d = double.tryParse(ctrl.text.trim());
+                if (d == null || d < _markerMinCm || d > _markerMaxCm) {
+                  setD(() => error = l.t('marker_size_range'));
+                  return;
+                }
+                Navigator.pop(ctx, d);
+              },
+              child: Text(l.t('save')),
+            ),
+          ],
+        ),
+      ),
+    );
+    ctrl.dispose();
+    if (v == null) return;
+    await ref.read(appDatabaseProvider).setSetting(_markerSizeKey, v.toStringAsFixed(1));
+    CameraPipeline.log('marker size set to ${v.toStringAsFixed(1)} cm');
+    // Any earlier calibration used the old size: recalibrate.
+    if (mounted && _cal != null && !_simulated) await _enterCalibrate();
+    if (mounted) setState(() {});
+  }
 
   /// Age-group window for fixed-duration tests (sit-ups 30 s / 45 s).
   int? get _windowSec => test.durationSecForAge(_athlete?.ageAtRegistration);
@@ -295,7 +360,8 @@ class _WorkbenchScreenState extends ConsumerState<WorkbenchScreen> with SingleTi
             _wantMarkers = true;
             final markers = await _markerWait!.future.timeout(const Duration(seconds: 4), onTimeout: () => const []);
             _wantMarkers = false;
-            cal = EngineRegistry.calibration.fromMarkers(
+            CameraPipeline.log('calibrating with marker side ${_markerSizeCm.toStringAsFixed(1)} cm');
+            cal = CalibrationEngine(markerSizeCm: _markerSizeCm).fromMarkers(
               kind: test.calibration,
               markers: markers,
               imageWidth: size.width,
@@ -969,6 +1035,25 @@ class _WorkbenchScreenState extends ConsumerState<WorkbenchScreen> with SingleTi
           Padding(
             padding: const EdgeInsets.only(top: AppSpace.sm),
             child: Text(l.t('wb_place_line'), style: const TextStyle(fontSize: 12, color: AppColors.textMuted)),
+          ),
+        if (_usesPrintedMarker && !_simulated)
+          Padding(
+            padding: const EdgeInsets.only(top: AppSpace.sm),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    l.t('marker_size_row', {'cm': _markerSizeCm.toStringAsFixed(1)}),
+                    style: AppText.metricS.copyWith(color: AppColors.text),
+                  ),
+                ),
+                TextButton.icon(
+                  onPressed: _editMarkerSize,
+                  icon: const Icon(Icons.straighten_rounded),
+                  label: Text(l.t('marker_size_edit')),
+                ),
+              ],
+            ),
           ),
         const SizedBox(height: AppSpace.md),
         ValueListenableBuilder<LevelReading>(
