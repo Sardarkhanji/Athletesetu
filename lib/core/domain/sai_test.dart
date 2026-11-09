@@ -181,7 +181,7 @@ enum SaiTest {
   /// Camera orientation for this test. Wide or lying-down scenes record in
   /// landscape (phone turned anticlockwise, top of the phone to the left);
   /// everything else stays portrait. Rolled out one test at a time.
-  bool get landscape => this == SaiTest.sitUps;
+  bool get landscape => this == SaiTest.sitUps || this == SaiTest.sitAndReach;
 
   /// Test window for an athlete of [ageYears].
   ///

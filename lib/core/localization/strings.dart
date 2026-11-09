@@ -302,8 +302,10 @@ const Map<String, List<String>> kStrings = {
   ],
   'test_sit_and_reach_name': ['Sit & Reach', 'सिट एंड रीच'],
   'test_sit_and_reach_setup': [
-    'Side view of the box with its scale visible. Hold the furthest reach for 1.5 s. Best of 3.',
-    'बॉक्स का साइड व्यू, स्केल दिखे। सबसे दूर की पहुँच 1.5 से. रोकें। 3 में सर्वश्रेष्ठ।'
+    'Landscape, side view, feet towards the right of the screen. Marker on a board standing on the tape, '
+        'left edge on the heel line (23 cm). Calibrate, remove the board, then reach and hold 2 s. Best of 3.',
+    'लैंडस्केप, साइड व्यू, पैर स्क्रीन के दाईं ओर। टेप पर खड़े बोर्ड पर मार्कर, बायाँ किनारा एड़ी रेखा (23 से.मी.) पर। '
+        'कैलिब्रेट करें, बोर्ड हटाएँ, फिर आगे पहुँचकर 2 से. रोकें। 3 में सर्वश्रेष्ठ।'
   ],
   'test_vertical_jump_name': ['Vertical Jump', 'वर्टिकल जंप'],
   'test_vertical_jump_setup': [

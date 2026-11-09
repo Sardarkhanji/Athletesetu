@@ -558,6 +558,9 @@ class SitReachSession implements MeasurementSession {
   /// Added to the box reading (some protocols put the zero mark 15/23 cm from the feet).
   final double reachOffsetCm;
 
+  /// KHOJ handbook: the tape's 23 cm mark is on the heel line (0 is 23 cm behind it).
+  static const heelLineCm = 23.0;
+
   @override
   SaiTest get test => SaiTest.sitAndReach;
 
@@ -998,6 +1001,11 @@ MeasurementSession createJumpReachSession(SaiTest test, CalibrationResult cal, {
       SaiTest.height => HeightSession(cal),
       SaiTest.verticalJump => VerticalJumpSession(cal),
       SaiTest.broadJump => BroadJumpSession(cal, athleteHeightCm: athleteHeightCm),
-      SaiTest.sitAndReach => SitReachSession(cal),
+      // Live: KHOJ floor-tape protocol. The marker's left edge sits on the heel
+      // line (the tape's 23 cm mark), so score = 23 + cm beyond the heels, and
+      // the hold is 2 s. Simulation keeps its original geometry (0 at the heels, 1.5 s).
+      SaiTest.sitAndReach => cal.simulated
+          ? SitReachSession(cal)
+          : SitReachSession(cal, reachOffsetCm: SitReachSession.heelLineCm, holdMs: 2000),
       _ => throw ArgumentError('${test.id} is not a jump/reach test'),
     };
