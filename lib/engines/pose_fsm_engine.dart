@@ -25,8 +25,9 @@ class SitUpThresholds {
     this.ascendDeg = 26,
     this.peakMinTorsoDeg = 55,
     this.elbowKneeRatio = 0.42,
-    this.handsDetachRatio = 0.95,
-    this.handsDetachFrames = 3,
+    this.handsDetachRatio = 1.3,
+    this.handsDetachMs = 250,
+    this.handsMinScore = 0.5,
     this.descendDropDeg = 10,
     this.reAscendDeg = 8,
     this.emaAlpha = 0.5,
@@ -46,8 +47,15 @@ class SitUpThresholds {
   final double elbowKneeRatio;
 
   /// Wrist–neck distance / upper-arm length above this means hands detached.
+  /// Clasped hands sit at about 0.3–0.8; a hand swung forward to push is ~1.5+.
   final double handsDetachRatio;
-  final int handsDetachFrames;
+
+  /// The wrist must stay that far away for this long (ms), not just a few frames.
+  final double handsDetachMs;
+
+  /// Only a clearly seen wrist can prove a foul. Behind the head the wrist is
+  /// usually hidden and the model's guess (often near the elbow) is unreliable.
+  final double handsMinScore;
 
   /// Drop from the rep's max torso angle that marks the descent.
   final double descendDropDeg;
@@ -116,7 +124,7 @@ class SitUpSession implements MeasurementSession {
   double? _elbowKneeEma;
   double? _wristNeckEma;
   double _descentMin = 90;
-  int _detachRun = 0;
+  double? _detachSinceMs;
   int _frames = 0;
   int _lowConfidenceFrames = 0;
   final _scores = <double>[];
@@ -148,8 +156,13 @@ class SitUpSession implements MeasurementSession {
     final s = f.nearSide;
     final shoulder = f.side(s, KP.leftShoulder), hip = f.side(s, KP.leftHip);
     final knee = f.side(s, KP.leftKnee), elbow = f.side(s, KP.leftElbow);
-    final wrist = f.side(s, KP.leftWrist), ear = f.side(s, KP.leftEar);
-    final tracked = [shoulder, hip, knee, elbow, wrist, ear];
+    // Hands are clasped, so either wrist will do: take the better-seen one.
+    // Same for the ear (the near ear is often hidden by the arm).
+    final wrist = f[KP.leftWrist].score >= f[KP.rightWrist].score ? f[KP.leftWrist] : f[KP.rightWrist];
+    final ear = f[KP.leftEar].score >= f[KP.rightEar].score ? f[KP.leftEar] : f[KP.rightEar];
+    // Counting needs only the body: wrists and ears behind the head are often
+    // hidden, and must not freeze the count.
+    final tracked = [shoulder, hip, knee, elbow];
     final score = mean(tracked.map((k) => k.score));
     _scores.add(score);
     if (tracked.any((k) => k.score < thresholds.minKeypointScore)) {
@@ -164,19 +177,35 @@ class SitUpSession implements MeasurementSession {
     final torsoRaw = math.atan2(-v.y, v.x.abs()) * 180 / math.pi;
     final thigh = math.max(hip.p.distanceTo(knee.p), 1.0);
     final upperArm = math.max(shoulder.p.distanceTo(elbow.p), 1.0);
-    final neck = Vec2.lerp(shoulder.p, ear.p, 0.6);
+    // Neck: 60% of the way from shoulder to ear; without a usable ear, extend
+    // the torso line past the shoulder by 35%.
+    final neck = ear.score >= thresholds.minKeypointScore
+        ? Vec2.lerp(shoulder.p, ear.p, 0.6)
+        : shoulder.p + (shoulder.p - hip.p) * 0.35;
+    final wristSeen = wrist.score >= thresholds.handsMinScore;
     final a = thresholds.emaAlpha;
     _torsoEma = _torsoEma == null ? torsoRaw : _torsoEma! + a * (torsoRaw - _torsoEma!);
     final ekRaw = elbow.p.distanceTo(knee.p) / thigh;
     _elbowKneeEma = _elbowKneeEma == null ? ekRaw : _elbowKneeEma! + a * (ekRaw - _elbowKneeEma!);
-    final wnRaw = wrist.p.distanceTo(neck) / upperArm;
-    _wristNeckEma = _wristNeckEma == null ? wnRaw : _wristNeckEma! + a * (wnRaw - _wristNeckEma!);
-    final torso = _torsoEma!, ek = _elbowKneeEma!, wn = _wristNeckEma!;
+    if (wristSeen) {
+      final wnRaw = wrist.p.distanceTo(neck) / upperArm;
+      _wristNeckEma = _wristNeckEma == null ? wnRaw : _wristNeckEma! + a * (wnRaw - _wristNeckEma!);
+    }
+    final torso = _torsoEma!, ek = _elbowKneeEma!;
+    final wn = _wristNeckEma ?? 0;
 
     // Hands-behind-neck check runs through the whole rep.
     if (_current != null) {
-      _detachRun = wn > thresholds.handsDetachRatio ? _detachRun + 1 : 0;
-      if (_detachRun >= thresholds.handsDetachFrames) _current!.fouls.add('foul_hands_detached');
+      // Foul only on clear evidence: wrist well seen AND far from the neck for
+      // handsDetachMs. A hidden wrist proves nothing either way.
+      if (wristSeen && wn > thresholds.handsDetachRatio) {
+        _detachSinceMs ??= f.tMs;
+        if (f.tMs - _detachSinceMs! >= thresholds.handsDetachMs) {
+          _current!.fouls.add('foul_hands_detached');
+        }
+      } else {
+        _detachSinceMs = null;
+      }
       _current!.maxTorsoDeg = math.max(_current!.maxTorsoDeg, torso);
       _current!.minElbowKnee = math.min(_current!.minElbowKnee, ek);
     }
@@ -185,7 +214,7 @@ class SitUpSession implements MeasurementSession {
       case SitUpState.flatBack:
         if (torso > thresholds.ascendDeg) {
           _current = SitUpRep(f.tMs);
-          _detachRun = 0;
+          _detachSinceMs = null;
           _state = SitUpState.ascending;
         }
       case SitUpState.ascending:
@@ -213,7 +242,7 @@ class SitUpSession implements MeasurementSession {
           _current!.fouls.add('foul_back_not_flat');
           _closeOpenRep(f.tMs);
           _current = SitUpRep(f.tMs);
-          _detachRun = 0;
+          _detachSinceMs = null;
           _state = SitUpState.ascending;
         }
     }
@@ -226,8 +255,9 @@ class SitUpSession implements MeasurementSession {
       HudLine(elbow.p, knee.p,
           dashed: true,
           tone: ek < thresholds.elbowKneeRatio ? HudTone.pass : HudTone.neutral),
-      HudPoint(wrist.p,
-          tone: wn > thresholds.handsDetachRatio ? HudTone.foul : HudTone.pass, radius: 7),
+      if (wristSeen)
+        HudPoint(wrist.p,
+            tone: wn > thresholds.handsDetachRatio ? HudTone.foul : HudTone.pass, radius: 7),
     ];
     return _snapshot(f, overlay);
   }
