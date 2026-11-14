@@ -593,6 +593,14 @@ class _WorkbenchScreenState extends ConsumerState<WorkbenchScreen> with SingleTi
 
     final session = _session!;
     var outcome = session.finalize();
+    if (test == SaiTest.sitUps) {
+      // Per-rep angles, to tune thresholds from real athletes.
+      for (final r in (outcome.metadata['reps'] as List? ?? const [])) {
+        CameraPipeline.log('situp rep $r');
+      }
+      CameraPipeline.log('situp result: ${outcome.metadata['validReps']} valid / '
+          '${outcome.metadata['attemptedReps']} attempted, fouls ${outcome.metadata['foulCounts']}');
+    }
     CameraPipeline.log('attempt ${test.id} #$_attemptNo → value=${outcome.value} conf=${outcome.confidence.round()} '
         'fouls=${outcome.fouls} simulated=$_simulated video=${video?.path}');
     final truth = _sim?.groundTruth ?? const <String, Object?>{};

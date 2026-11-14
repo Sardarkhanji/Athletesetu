@@ -21,15 +21,20 @@ enum SitUpState { flatBack, ascending, peakElbowTouch, descending }
 
 class SitUpThresholds {
   const SitUpThresholds({
-    this.flatDeg = 18,
-    this.ascendDeg = 26,
+    // Real lying athletes read 5–20° "flat" (shoulders sit on the clasped hands
+    // and MoveNet's shoulder point drifts on horizontal bodies), so flat < 25°
+    // with a 10° gap to the ascent trigger.
+    this.flatDeg = 25,
+    this.ascendDeg = 35,
     this.peakMinTorsoDeg = 55,
-    this.elbowKneeRatio = 0.42,
+    // Joint centres stay apart even when the elbow touches the knee
+    // (elbow tip to knee top), so the old 0.42 thigh-lengths missed real touches.
+    this.elbowKneeRatio = 0.55,
     this.handsDetachRatio = 1.3,
     this.handsDetachMs = 250,
     this.handsMinScore = 0.5,
     this.descendDropDeg = 10,
-    this.reAscendDeg = 8,
+    this.reAscendDeg = 12,
     this.emaAlpha = 0.5,
     this.minKeypointScore = 0.3,
   });
@@ -72,6 +77,8 @@ class SitUpRep {
   double? endMs;
   double maxTorsoDeg = 0;
   double minElbowKnee = double.infinity;
+  /// Lowest torso angle between the peak and the next rep (how flat it got).
+  double? bottomTorsoDeg;
   bool touched = false;
   final Set<String> fouls = {};
   bool get valid => fouls.isEmpty && touched;
@@ -80,6 +87,9 @@ class SitUpRep {
         'startMs': startMs.round(),
         'endMs': endMs?.round(),
         'maxTorsoDeg': maxTorsoDeg.round(),
+        'minElbowKnee': minElbowKnee.isFinite ? double.parse(minElbowKnee.toStringAsFixed(2)) : null,
+        'bottomTorsoDeg': bottomTorsoDeg?.round(),
+        'touched': touched,
         'valid': valid,
         'fouls': fouls.toList(),
       };
@@ -153,7 +163,8 @@ class SitUpSession implements MeasurementSession {
     }
     _frames++;
 
-    final s = f.nearSide;
+    // Lock the camera-facing side once; per-frame switching made angles jump.
+    final s = _lockSide(f);
     final shoulder = f.side(s, KP.leftShoulder), hip = f.side(s, KP.leftHip);
     final knee = f.side(s, KP.leftKnee), elbow = f.side(s, KP.leftElbow);
     // Hands are clasped, so either wrist will do: take the better-seen one.
@@ -234,6 +245,7 @@ class SitUpSession implements MeasurementSession {
         }
       case SitUpState.descending:
         _descentMin = math.min(_descentMin, torso);
+        _current!.bottomTorsoDeg = _descentMin;
         if (torso <= thresholds.flatDeg) {
           _closeOpenRep(f.tMs);
           _state = SitUpState.flatBack;
@@ -254,12 +266,33 @@ class SitUpSession implements MeasurementSession {
           label: '${torso.round()}°'),
       HudLine(elbow.p, knee.p,
           dashed: true,
-          tone: ek < thresholds.elbowKneeRatio ? HudTone.pass : HudTone.neutral),
+          tone: ek < thresholds.elbowKneeRatio ? HudTone.pass : HudTone.neutral,
+          label: ek.toStringAsFixed(2)),
       if (wristSeen)
         HudPoint(wrist.p,
             tone: wn > thresholds.handsDetachRatio ? HudTone.foul : HudTone.pass, radius: 7),
     ];
     return _snapshot(f, overlay);
+  }
+
+  int? _side;
+
+  /// Side (0 left, 1 right) whose shoulder/hip/knee/elbow are better seen.
+  /// Chosen on the first clear frame; switched only if it becomes unusable
+  /// while the other side is fully visible.
+  int _lockSide(PoseFrame f) {
+    double sideScore(int s) => [KP.leftShoulder, KP.leftHip, KP.leftKnee, KP.leftElbow]
+        .map((k) => f.side(s, k).score)
+        .reduce(math.min);
+    final l = sideScore(0), r = sideScore(1);
+    final best = l >= r ? 0 : 1;
+    if (_side == null) {
+      if (math.max(l, r) >= thresholds.minKeypointScore) _side = best;
+      return best;
+    }
+    final cur = _side == 0 ? l : r, other = _side == 0 ? r : l;
+    if (cur < thresholds.minKeypointScore && other >= thresholds.minKeypointScore) _side = 1 - _side!;
+    return _side!;
   }
 
   void _closeOpenRep(double t, {bool timeUp = false}) {
