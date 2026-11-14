@@ -2,6 +2,9 @@
 
 Flutter 3.41.5 / Dart 3.11.3. Uses Riverpod 2.6 (Notifier / FutureProvider) and go_router 17. Read `README.md` for setup and layout.
 
+## Branch
+- All work goes to the single branch `dev`. Don't create new branches. `main` is updated only when the team decides to merge `dev`.
+
 ## Commands
 - `flutter analyze` must stay clean (zero issues).
 - `flutter test` runs 10 engine simulation tests, all passing as of v1.0.0.
