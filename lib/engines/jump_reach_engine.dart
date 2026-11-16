@@ -55,43 +55,99 @@ Vec2 estimateVertex(PoseFrame f) {
   return Vec2(eye.x, eye.y - 0.545 * (sh.y - eye.y));
 }
 
-/// Heel baseline: silhouette bottom if plausible, else below the lower ankle.
-Vec2 estimateHeel(PoseFrame f) {
-  if (silhouetteBottomPlausible(f)) return f.silhouetteBottom!;
+/// Floor line under the ankles: the ankle joint sits about 0.16 shin lengths
+/// (≈ 4% of stature) above the floor.
+Vec2 heelFromAnkles(PoseFrame f) {
   final s = f[KP.leftAnkle].p.y >= f[KP.rightAnkle].p.y ? 0 : 1;
   final ankle = f.side(s, KP.leftAnkle).p, knee = f.side(s, KP.leftKnee).p;
   return Vec2(ankle.x, ankle.y + 0.16 * ankle.distanceTo(knee));
 }
 
+/// Heel baseline: silhouette bottom if plausible, else below the lower ankle.
+Vec2 estimateHeel(PoseFrame f) {
+  if (silhouetteBottomPlausible(f)) return f.silhouetteBottom!;
+  return heelFromAnkles(f);
+}
+
 double _confFromStd(double stdCm, double targetCm) =>
     (100 * math.exp(-math.pow(stdCm / targetCm, 2) / 2)).clamp(0.0, 100.0);
+
+/// Focal length of a phone main camera's video stream, as a fraction of the
+/// frame's long side (≈ 68° field of view). Checked on a Moto g45: a 20 cm
+/// marker 2.5 m away gives 3.75 px/cm on a 1280 px frame → 0.73.
+const double kFocalPerLongSide = 0.75;
 
 // ---------------------------------------------------------------------------
 // Height
 // ---------------------------------------------------------------------------
 
 class HeightSession implements MeasurementSession {
-  HeightSession(this.cal, {this.samplesNeeded = 30});
+  HeightSession(this.cal, {this.samplesNeeded = 30, this.lenient = false, bool? liveCamera})
+      : liveCamera = liveCamera ?? !cal.simulated;
 
   final CalibrationResult cal;
   final int samplesNeeded;
+
+  /// Wider stillness tolerances, and a best-effort value when the athlete never
+  /// stood fully still, instead of "no reading".
+  final bool lenient;
+
+  /// Real camera (not the simulator). The athlete stands in front of the wall,
+  /// not in the marker's plane, so the reading is corrected for perspective,
+  /// and the floor line comes from the ankles (floor shadows and reflections
+  /// make the silhouette's bottom unreliable).
+  final bool liveCamera;
+
+  /// How far in front of the wall the measured points are (cm): the top of the
+  /// head (mid-skull, head against the wall) and the ankle joint (heels to wall).
+  static const headDepthCm = 10.0, ankleDepthCm = 5.0;
 
   @override
   SaiTest get test => SaiTest.height;
 
   final _samples = <double>[];
+  final _all = <double>[]; // every reading with the athlete in frame (lenient fallback)
   final _recentTorso = <Vec2>[];
   final _scores = <double>[];
   bool _complete = false;
   Vec2? _vertex, _heel;
   bool _usedSilhouette = false;
+  double? _cameraDistanceCm;
+
+  double get _stillSpreadCm => lenient ? 3.0 : 1.2;
+  double get _stableStdCm => lenient ? 1.5 : 0.6;
 
   @override
   bool get isComplete => _complete;
 
+  bool _personSeen(PoseFrame f) => lenient
+      ? f.scoreOf([
+            KP.leftEye, KP.rightEye, KP.leftShoulder, KP.rightShoulder, //
+            KP.leftHip, KP.rightHip, KP.leftAnkle, KP.rightAnkle,
+          ]) >=
+          0.2
+      : f.hasPerson;
+
+  /// Height between the two image points, in cm on the wall plane, corrected
+  /// (live only) for the points being nearer the camera than the wall.
+  double _heightCm(PoseFrame f, Vec2 vertex, Vec2 heel) {
+    final top = cal.toPlaneCm(vertex).y, bottom = cal.toPlaneCm(heel).y;
+    if (!liveCamera) return top - bottom;
+    // Camera-to-wall distance from the marker scale: px/cm = focal px / distance.
+    final distCm = kFocalPerLongSide * math.max(f.width, f.height) / cal.pixelsPerCm;
+    _cameraDistanceCm = distCm;
+    if (distCm < 120) return top - bottom; // too close for the model to hold
+    // A point d cm in front of the wall looks (dist / (dist - d)) times further
+    // from the camera axis (the image centre) than it is.
+    final axisY = cal.toPlaneCm(Vec2(f.width / 2, f.height / 2)).y;
+    final topC = axisY + (top - axisY) * (distCm - headDepthCm) / distCm;
+    final bottomC = axisY + (bottom - axisY) * (distCm - ankleDepthCm) / distCm;
+    return topC - bottomC;
+  }
+
   @override
   EngineSnapshot process(PoseFrame f) {
-    if (_complete || !f.hasPerson) return _snap(const []);
+    if (_complete || !_personSeen(f)) return _snap(const []);
     _recentTorso.add(f.torsoCenter);
     if (_recentTorso.length > 12) _recentTorso.removeAt(0);
     final spreadCm = _recentTorso.length < 12
@@ -99,11 +155,13 @@ class HeightSession implements MeasurementSession {
         : _recentTorso.map((p) => p.distanceTo(_recentTorso.first)).reduce(math.max) / cal.pixelsPerCm;
 
     _vertex = estimateVertex(f);
-    _heel = estimateHeel(f);
+    _heel = liveCamera ? heelFromAnkles(f) : estimateHeel(f);
     _usedSilhouette = silhouetteTopPlausible(f);
-    final hCm = cal.toPlaneCm(_vertex!).y - cal.toPlaneCm(_heel!).y;
+    final hCm = _heightCm(f, _vertex!, _heel!);
+    _all.add(hCm);
+    if (_all.length > 90) _all.removeAt(0);
 
-    if (spreadCm < 1.2) {
+    if (spreadCm < _stillSpreadCm) {
       _samples.add(hCm);
       _scores.add(f.scoreOf([KP.leftEye, KP.rightEye, KP.leftAnkle, KP.rightAnkle]));
       if (_samples.length > samplesNeeded) {
@@ -112,7 +170,7 @@ class HeightSession implements MeasurementSession {
       }
       // Only finish once the athlete has stood fully upright and still for the
       // whole window (rejects the last bent-knee frames of walking in).
-      if (_samples.length == samplesNeeded && stdDev(_samples) < 0.6) _complete = true;
+      if (_samples.length == samplesNeeded && stdDev(_samples) < _stableStdCm) _complete = true;
     } else {
       _samples.clear();
       _scores.clear();
@@ -137,23 +195,49 @@ class HeightSession implements MeasurementSession {
 
   @override
   AttemptOutcome finalize() {
+    // Strict: at least 5 readings taken while standing still. Lenient: if the
+    // athlete never stood still enough, use the last ~3 s of readings instead.
+    var values = _samples;
+    var steady = true;
     if (_samples.length < 5) {
-      return const AttemptOutcome(test: SaiTest.height, value: null, confidence: 0, fouls: ['phase_standing_still']);
+      steady = false;
+      values = lenient && _all.length >= 8 ? _all.sublist(math.max(0, _all.length - 45)) : const [];
     }
-    final v = median(_samples);
-    final sd = stdDev(_samples);
-    final conf = _confFromStd(sd, 1.0) * 0.55 +
+    final v = values.isEmpty ? double.nan : median(values);
+    // No reading, or one no person can have: leave it to a retake / manual entry.
+    if (v.isNaN || v < 50 || v > 250) {
+      return AttemptOutcome(
+        test: SaiTest.height,
+        value: null,
+        confidence: 0,
+        fouls: const ['phase_standing_still'],
+        metadata: {
+          'readings': _all.length,
+          'steadyReadings': _samples.length,
+          if (!v.isNaN) 'rejectedCm': double.parse(v.toStringAsFixed(1)),
+          'rules': lenient ? 'lenient' : 'strict',
+        },
+      );
+    }
+    final sd = stdDev(values);
+    final kp = _scores.isEmpty ? 0.5 : mean(_scores);
+    var conf = _confFromStd(sd, lenient ? 2.0 : 1.0) * 0.55 +
         cal.confidence * 0.30 +
-        (mean(_scores) * 100).clamp(0, 100) * 0.10 +
+        (kp * 100).clamp(0, 100) * 0.10 +
         (_usedSilhouette ? 5 : 0);
+    if (!steady) conf *= 0.6;
     return AttemptOutcome(
       test: test,
       value: v,
       confidence: conf.clamp(0, 99),
       metadata: {
-        'samples': _samples.length,
+        'samples': values.length,
         'stdCm': double.parse(sd.toStringAsFixed(2)),
         'method': _usedSilhouette ? 'silhouette' : 'keypoint_extrapolation',
+        'steady': steady,
+        'rules': lenient ? 'lenient' : 'strict',
+        'perspectiveCorrected': liveCamera && (_cameraDistanceCm ?? 0) >= 120,
+        if (_cameraDistanceCm != null) 'cameraDistanceCm': _cameraDistanceCm!.round(),
         'calibration': cal.toJson(),
       },
     );
@@ -549,7 +633,8 @@ class ReachAttempt {
 }
 
 class SitReachSession implements MeasurementSession {
-  SitReachSession(this.cal, {this.maxAttempts = 3, this.holdMs = 1500, this.reachOffsetCm = 0});
+  SitReachSession(this.cal,
+      {this.maxAttempts = 3, this.holdMs = 1500, this.reachOffsetCm = 0, this.lenient = false});
 
   final CalibrationResult cal;
   final int maxAttempts;
@@ -560,6 +645,11 @@ class SitReachSession implements MeasurementSession {
 
   /// KHOJ handbook: the tape's 23 cm mark is on the heel line (0 is 23 cm behind it).
   static const heelLineCm = 23.0;
+
+  /// Lenient rule set: a wider hold band, a knee-bend foul only when the knee
+  /// is clearly bent for most of the reach, and a best-effort value (the
+  /// furthest reach) when no reach was held long enough.
+  final bool lenient;
 
   @override
   SaiTest get test => SaiTest.sitAndReach;
@@ -572,6 +662,11 @@ class SitReachSession implements MeasurementSession {
 
   /// Hold = smoothed fingertip stays within this band for [holdMs].
   static const holdBandCm = 1.5;
+  double get _holdBandCm => lenient ? 4.0 : holdBandCm;
+
+  // Lenient knee check: frames of the current attempt, and how many had a bent knee.
+  int _attemptFrames = 0, _kneeBentFrames = 0;
+  double? _maxSeenCm;
   final _scores = <double>[];
   final _fouls = <String>[];
   Vec2? _finger;
@@ -591,7 +686,10 @@ class SitReachSession implements MeasurementSession {
 
   @override
   EngineSnapshot process(PoseFrame f) {
-    if (!f.hasPerson || isComplete) return _snap(f, null);
+    final seen = lenient
+        ? f.scoreOf([KP.leftShoulder, KP.rightShoulder, KP.leftHip, KP.rightHip, KP.leftWrist, KP.rightWrist]) >= 0.2
+        : f.hasPerson;
+    if (!seen || isComplete) return _snap(f, null);
     // Facing: the athlete reaches from hips towards feet.
     final hip = f.midpoint(KP.leftHip, KP.rightHip), ankle = f.midpoint(KP.leftAnkle, KP.rightAnkle);
     _facing = ankle.x >= hip.x ? 1 : -1;
@@ -602,18 +700,26 @@ class SitReachSession implements MeasurementSession {
     final s = f.nearSide;
     final knee = angleDeg(f.side(s, KP.leftHip).p, f.side(s, KP.leftKnee).p, f.side(s, KP.leftAnkle).p);
 
+    _maxSeenCm = _maxSeenCm == null ? reach : math.max(_maxSeenCm!, reach);
     _restCm ??= reach;
     if (_current == null) {
       _restCm = math.min(_restCm!, reach);
       if (reach > _restCm! + 6) {
         _current = ReachAttempt(f.tMs);
         _window.clear();
+        _attemptFrames = 0;
+        _kneeBentFrames = 0;
       }
     }
     final cur = _current;
     if (cur != null) {
       cur.maxReachCm = math.max(cur.maxReachCm, reach);
-      if (knee < 160) cur.fouls.add('foul_knee_bent');
+      _attemptFrames++;
+      if (lenient) {
+        if (knee < 140) _kneeBentFrames++;
+      } else if (knee < 160) {
+        cur.fouls.add('foul_knee_bent');
+      }
       _window.add((f.tMs, reach));
       while (_window.isNotEmpty && f.tMs - _window.first.$1 > holdMs) {
         _window.removeAt(0);
@@ -623,12 +729,13 @@ class SitReachSession implements MeasurementSession {
       final range = values.reduce(math.max) - values.reduce(math.min);
       final stillMs = _stillSpanMs();
       cur.heldMs = math.max(cur.heldMs, stillMs);
-      if (cur.heldReachCm == null && span >= holdMs * 0.97 && range < holdBandCm && reach > cur.maxReachCm - 2) {
+      if (cur.heldReachCm == null && span >= holdMs * 0.97 && range < _holdBandCm && reach > cur.maxReachCm - 2) {
         cur.heldReachCm = median(values);
       }
       // Retraction ends the attempt.
       if (reach < cur.maxReachCm - 8) {
         if (cur.heldReachCm == null) cur.fouls.add('foul_hold_short');
+        _applyLenientKneeFoul(cur);
         attempts.add(cur);
         _fouls.addAll(cur.fouls);
         _current = null;
@@ -636,6 +743,11 @@ class SitReachSession implements MeasurementSession {
       }
     }
     return _snap(f, reach);
+  }
+
+  /// Lenient: knee bent (< 140°) on more than half of the attempt's frames.
+  void _applyLenientKneeFoul(ReachAttempt a) {
+    if (lenient && _attemptFrames >= 4 && _kneeBentFrames > _attemptFrames * 0.5) a.fouls.add('foul_knee_bent');
   }
 
   /// How long (ms) the most recent samples have stayed within the hold band.
@@ -647,7 +759,7 @@ class SitReachSession implements MeasurementSession {
       final v = _window[i].$2;
       lo = math.min(lo, v);
       hi = math.max(hi, v);
-      if (hi - lo >= holdBandCm) break;
+      if (hi - lo >= _holdBandCm) break;
       start = _window[i].$1;
     }
     return _window.last.$1 - start;
@@ -677,24 +789,42 @@ class SitReachSession implements MeasurementSession {
     );
   }
 
-  double? _best() {
+  /// Best reach that met every rule (held, no foul).
+  double? _bestValid() {
     final valid = attempts.where((a) => a.valid).map((a) => a.heldReachCm!);
     return valid.isEmpty ? null : valid.reduce(math.max);
+  }
+
+  /// Strict: the best valid reach. Lenient: if there is none, fall back to the
+  /// best held reach, then the furthest reach of any attempt, then the furthest
+  /// reach seen at all, so an attempt always yields a value to review.
+  double? _best() {
+    final valid = _bestValid();
+    if (valid != null || !lenient) return valid;
+    final held = attempts.where((a) => a.heldReachCm != null).map((a) => a.heldReachCm!);
+    if (held.isNotEmpty) return held.reduce(math.max);
+    if (attempts.isNotEmpty) return attempts.map((a) => a.maxReachCm).reduce(math.max);
+    return _maxSeenCm;
   }
 
   @override
   AttemptOutcome finalize() {
     if (_current != null) {
       if (_current!.heldReachCm == null) _current!.fouls.add('foul_hold_short');
+      _applyLenientKneeFoul(_current!);
       attempts.add(_current!);
       _current = null;
     }
     final best = _best();
+    final metRules = _bestValid() != null;
     final kp = _scores.isEmpty ? 0.6 : mean(_scores);
     final validCount = attempts.where((a) => a.valid).length;
+    // A best-effort value (no reach met every rule) is capped at 55%.
     final conf = best == null
         ? 0.0
-        : (cal.confidence * 0.45 + kp.clamp(0.0, 1.0) * 100 * 0.35 + (validCount >= 2 ? 20 : 10)).clamp(5.0, 99.0);
+        : metRules
+            ? (cal.confidence * 0.45 + kp.clamp(0.0, 1.0) * 100 * 0.35 + (validCount >= 2 ? 20 : 10)).clamp(5.0, 99.0)
+            : (cal.confidence * 0.30 + kp.clamp(0.0, 1.0) * 100 * 0.20).clamp(5.0, 55.0);
     return AttemptOutcome(
       test: test,
       value: best,
@@ -703,6 +833,8 @@ class SitReachSession implements MeasurementSession {
       metadata: {
         'attempts': attempts.map((a) => a.toJson()).toList(),
         'holdMs': holdMs,
+        'rules': lenient ? 'lenient' : 'strict',
+        'metAllRules': metRules,
         'calibration': cal.toJson(),
       },
     );
@@ -996,9 +1128,14 @@ class JumpReachSimulator extends FrameSimulator {
 }
 
 /// Builds the right measurement session for a jump/reach test.
-MeasurementSession createJumpReachSession(SaiTest test, CalibrationResult cal, {double? athleteHeightCm}) =>
+MeasurementSession createJumpReachSession(
+  SaiTest test,
+  CalibrationResult cal, {
+  double? athleteHeightCm,
+  bool lenient = false,
+}) =>
     switch (test) {
-      SaiTest.height => HeightSession(cal),
+      SaiTest.height => HeightSession(cal, lenient: lenient),
       SaiTest.verticalJump => VerticalJumpSession(cal),
       SaiTest.broadJump => BroadJumpSession(cal, athleteHeightCm: athleteHeightCm),
       // Live: KHOJ floor-tape protocol. The marker's left edge sits on the heel
@@ -1006,6 +1143,12 @@ MeasurementSession createJumpReachSession(SaiTest test, CalibrationResult cal, {
       // the hold is 2 s. Simulation keeps its original geometry (0 at the heels, 1.5 s).
       SaiTest.sitAndReach => cal.simulated
           ? SitReachSession(cal)
-          : SitReachSession(cal, reachOffsetCm: SitReachSession.heelLineCm, holdMs: 2000),
+          : SitReachSession(
+              cal,
+              reachOffsetCm: SitReachSession.heelLineCm,
+              // KHOJ: hold 2 s. Lenient: 1 s within a wider band.
+              holdMs: lenient ? 1000 : 2000,
+              lenient: lenient,
+            ),
       _ => throw ArgumentError('${test.id} is not a jump/reach test'),
     };

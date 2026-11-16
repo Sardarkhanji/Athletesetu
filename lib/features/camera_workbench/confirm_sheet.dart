@@ -264,6 +264,7 @@ class _Details extends ConsumerWidget {
     'validReps', 'attemptedReps', 'rejectedReps', 'spatialDeltaCm', 'flightTimeMs', 'flightHeightCm',
     'standingReachCm', 'disagreementCm', 'stdCm', 'method', 'settleSpreadCm', 'heelOffsetCm', 'mode',
     'missedTouches', 'lapSplitsS', 'ocrText', 'aiProposedCm', 'scrubAdjustCm', 'fitResidualPx', 'bmi',
+    'rules', 'steady', 'metAllRules', 'perspectiveCorrected', 'cameraDistanceCm',
   };
 
   @override

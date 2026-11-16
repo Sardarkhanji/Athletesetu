@@ -15,6 +15,8 @@ Flutter 3.41.5 / Dart 3.11.3. Uses Riverpod 2.6 (Notifier / FutureProvider) and 
   - Each test has a `MeasurementSession` plus a `FrameSimulator`.
   - Simulators render a humanoid rig through a pinhole `SimCamera`, so the real algorithms run on synthetic frames.
   - Any accuracy change must keep `test/engines_simulation_test.dart` green.
+- **Rule sets:** live camera sessions use the *lenient* rule set while `kLenientLiveRules` (in `engine_registry.dart`) is true: wider tolerances and a best-effort value instead of "no reading". Set it to false for strict SAI scoring. Simulation always uses simulator-tuned thresholds (`SitUpThresholds.simulator()`, strict jump/reach paths), so the simulation tests don't depend on the live tuning. Every saved result records `rules` in its metadata.
+- **Height (live):** the floor line comes from the ankles, and the reading is corrected for the athlete standing in front of the marker plane (`HeightSession._heightCm`, camera distance from `kFocalPerLongSide`). Depth constants are assumptions until real-athlete data is in.
 - **Calibration:**
   - Wall and box markers use a reflection-similarity fit. Don't switch them to a full homography: four noisy corners distort scale.
   - Floor tests use a DLT homography plus `LineProjectiveMap`.

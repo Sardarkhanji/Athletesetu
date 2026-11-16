@@ -438,6 +438,7 @@ class _WorkbenchScreenState extends ConsumerState<WorkbenchScreen> with SingleTi
         durationSec: _windowSec,
         // Live sit-ups: the timer starts on the assessor's GO beep, not on first sight.
         waitForGo: !_simulated && test == SaiTest.sitUps,
+        lenient: !_simulated && kLenientLiveRules,
       ),
     );
     _snap.value = EngineSnapshot.idle;
@@ -600,6 +601,11 @@ class _WorkbenchScreenState extends ConsumerState<WorkbenchScreen> with SingleTi
       }
       CameraPipeline.log('situp result: ${outcome.metadata['validReps']} valid / '
           '${outcome.metadata['attemptedReps']} attempted, fouls ${outcome.metadata['foulCounts']}');
+    }
+    if (test == SaiTest.height || test == SaiTest.sitAndReach) {
+      // What the engine saw, to tune from real athletes.
+      final detail = Map<String, Object?>.of(outcome.metadata)..remove('calibration');
+      CameraPipeline.log('${test.id} detail $detail');
     }
     CameraPipeline.log('attempt ${test.id} #$_attemptNo → value=${outcome.value} conf=${outcome.confidence.round()} '
         'fouls=${outcome.fouls} simulated=$_simulated video=${video?.path}');

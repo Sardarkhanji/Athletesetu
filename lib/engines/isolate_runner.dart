@@ -553,10 +553,21 @@ class _Sampler {
     return false;
   }
 
+  // Look for the top of the head only where it can be: from 1.3× the
+  // eye-to-shoulder distance above the eyes, downwards. Anything higher up the
+  // wall (a shadow, a switchboard, flicker) cannot then be taken for the head.
+  var yStart = 0;
+  final le = kps[KP.leftEye], re = kps[KP.rightEye];
+  final ls = kps[KP.leftShoulder], rs = kps[KP.rightShoulder];
+  if (math.min(le.score, re.score) > 0.3 && math.min(ls.score, rs.score) > 0.3) {
+    final eyeY = (le.p.y + re.p.y) / 2 / scale, shY = (ls.p.y + rs.p.y) / 2 / scale;
+    if (shY > eyeY) yStart = (eyeY - 1.3 * (shY - eyeY)).floor().clamp(0, h - 2);
+  }
   int? top, bottom;
-  for (var y = 0; y < h - 1; y++) {
+  for (var y = yStart; y < h - 1; y++) {
     if (rowHit(y) && rowHit(y + 1)) {
-      top = y;
+      // A hit on the window's first row means something reaches above it.
+      if (y > yStart || yStart == 0) top = y;
       break;
     }
   }
@@ -569,7 +580,8 @@ class _Sampler {
   if (top == null || bottom == null || bottom - top < h * 0.2) return (null, null);
   // A "person" touching both frame edges is a lighting change, not a person.
   if (top <= 1 && bottom >= h - 2) return (null, null);
-  return (Vec2(cx * scale, (top + 0.5) * scale), Vec2(cx * scale, (bottom + 0.5) * scale));
+  // Rows are counted from their top edge: the head's top is the top of row `top`.
+  return (Vec2(cx * scale, top * scale), Vec2(cx * scale, (bottom + 1) * scale));
 }
 
 /// Small moving blob outside the athlete's body box (the thrown ball).

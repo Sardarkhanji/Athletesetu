@@ -12,6 +12,14 @@ import 'pose_fsm_engine.dart';
 import 'pose_types.dart';
 import 'timing_gate_engine.dart';
 
+/// Live camera sessions use the lenient rule set (wider tolerances, and a
+/// best-effort value instead of "no reading"), so every attempt is recorded
+/// while thresholds are still being tuned on real athletes. Each saved result
+/// carries `rules: lenient|strict` in its metadata. Set to false to score live
+/// attempts with the strict SAI rule set. Simulation always uses its own
+/// simulator-tuned thresholds.
+const kLenientLiveRules = true;
+
 class SessionConfig {
   const SessionConfig({
     this.athleteHeightCm,
@@ -19,6 +27,7 @@ class SessionConfig {
     this.useRemoteStart = false,
     this.durationSec,
     this.waitForGo = false,
+    this.lenient = false,
   });
   final double? athleteHeightCm;
   final int enduranceLaps;
@@ -29,6 +38,9 @@ class SessionConfig {
 
   /// Sit-ups: hold the timer until the assessor's "Go" ([SitUpSession.startAt]).
   final bool waitForGo;
+
+  /// Use the lenient rule set (see [kLenientLiveRules]). Ignored in simulation.
+  final bool lenient;
 }
 
 abstract final class EngineRegistry {
@@ -38,10 +50,18 @@ abstract final class EngineRegistry {
   static MeasurementSession createSession(SaiTest test, CalibrationResult cal, SessionConfig cfg) =>
       switch (test.engine) {
         EngineKind.poseFsm => SitUpSession(
+            thresholds: cal.simulated
+                ? const SitUpThresholds.simulator()
+                : (cfg.lenient ? const SitUpThresholds.lenient() : const SitUpThresholds()),
             durationSec: cfg.durationSec ?? test.durationSec,
             waitForGo: cfg.waitForGo,
           ),
-        EngineKind.jumpReach => createJumpReachSession(test, cal, athleteHeightCm: cfg.athleteHeightCm),
+        EngineKind.jumpReach => createJumpReachSession(
+            test,
+            cal,
+            athleteHeightCm: cfg.athleteHeightCm,
+            lenient: cfg.lenient && !cal.simulated,
+          ),
         EngineKind.timingGate => TimingGateSession(
             test: test,
             linesX: cal.gateLinesX,

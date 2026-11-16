@@ -37,7 +37,44 @@ class SitUpThresholds {
     this.reAscendDeg = 12,
     this.emaAlpha = 0.5,
     this.minKeypointScore = 0.3,
+    this.uprightTouchDeg = 999,
+    this.name = 'strict',
   });
+
+  /// Wider tolerances for live use while thresholds are tuned on real athletes.
+  /// The three SAI rules still apply (touch, flat return, hands), with more slack:
+  /// "flat" up to 38°, a touch at up to 0.8 thigh lengths or simply by sitting
+  /// up to 62°, and hands must be clearly away for 0.4 s.
+  const SitUpThresholds.lenient()
+      : this(
+          flatDeg: 38,
+          ascendDeg: 46,
+          peakMinTorsoDeg: 45,
+          elbowKneeRatio: 0.8,
+          uprightTouchDeg: 62,
+          handsDetachRatio: 1.6,
+          handsDetachMs: 400,
+          handsMinScore: 0.6,
+          descendDropDeg: 12,
+          reAscendDeg: 18,
+          minKeypointScore: 0.2,
+          name: 'lenient',
+        );
+
+  /// The v1.0.0 numbers the simulator's synthetic athlete was tuned with.
+  const SitUpThresholds.simulator()
+      : this(
+          flatDeg: 18,
+          ascendDeg: 26,
+          peakMinTorsoDeg: 55,
+          elbowKneeRatio: 0.42,
+          handsDetachRatio: 0.95,
+          handsDetachMs: 90,
+          handsMinScore: 0.3,
+          descendDropDeg: 10,
+          reAscendDeg: 8,
+          name: 'simulator',
+        );
 
   /// Torso below this angle to the floor counts as flat.
   final double flatDeg;
@@ -69,6 +106,13 @@ class SitUpThresholds {
   final double reAscendDeg;
   final double emaAlpha;
   final double minKeypointScore;
+
+  /// Sitting up at least this far counts as reaching the knees even if the
+  /// elbow-knee distance was not seen closing (999 = never; strict rule set).
+  final double uprightTouchDeg;
+
+  /// Rule set name, saved with every result.
+  final String name;
 }
 
 class SitUpRep {
@@ -229,7 +273,8 @@ class SitUpSession implements MeasurementSession {
           _state = SitUpState.ascending;
         }
       case SitUpState.ascending:
-        if (ek < thresholds.elbowKneeRatio && torso >= thresholds.peakMinTorsoDeg) {
+        if ((ek < thresholds.elbowKneeRatio && torso >= thresholds.peakMinTorsoDeg) ||
+            torso >= thresholds.uprightTouchDeg) {
           _current!.touched = true;
           _state = SitUpState.peakElbowTouch;
         } else if (torso < _current!.maxTorsoDeg - thresholds.descendDropDeg) {
@@ -367,6 +412,7 @@ class SitUpSession implements MeasurementSession {
         'foulCounts': foulCounts,
         'reps': reps.map((r) => r.toJson()).toList(),
         'durationSec': durationMs / 1000,
+        'rules': thresholds.name,
       },
     );
   }
