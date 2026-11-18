@@ -36,7 +36,7 @@ enum _Stage { loading, calibrate, ready, recording, analysing, done }
 /// DEMO-RECORDING BRANCH ONLY: fixed results for height and weight.
 /// After the attempt the app shows "Calculating…" for [_kDemoCalcDelay] and
 /// then reports these values. Do not merge into dev/main.
-const _kDemoFixedValues = <SaiTest, double>{SaiTest.height: 169, SaiTest.weight: 64};
+const _kDemoFixedValues = <SaiTest, double>{SaiTest.height: 169, SaiTest.weight: 64.8};
 const _kDemoCalcDelay = Duration(milliseconds: 2500);
 
 class WorkbenchScreen extends ConsumerStatefulWidget {
