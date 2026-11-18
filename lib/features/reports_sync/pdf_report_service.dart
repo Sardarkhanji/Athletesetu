@@ -113,7 +113,7 @@ class PdfReportService {
     );
 
     pw.Widget cell(pw.Widget child, {bool header = false}) => pw.Container(
-          padding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 5),
+          padding: const pw.EdgeInsets.symmetric(horizontal: 5, vertical: 3),
           color: header ? const PdfColor.fromInt(0xFFF1F5F9) : null,
           child: child,
         );
@@ -132,97 +132,117 @@ class PdfReportService {
     // Gender value contains Hindi: render it as image.
     final genderValue = await _hi(l10n.hi(genderKey), size: 9, color: const Color(0xFF0F172A));
 
-    doc.addPage(pw.MultiPage(
-      pageFormat: PdfPageFormat.a4,
-      margin: const pw.EdgeInsets.fromLTRB(36, 36, 36, 40),
-      footer: (ctx) => pw.Column(
+    // One A4 page, always: the report is laid out at full page width and, if
+    // it ever runs taller than the page (long school names, wrapped rows),
+    // scaled down to fit instead of spilling onto a second page.
+    const format = PdfPageFormat.a4;
+    const margin = pw.EdgeInsets.fromLTRB(36, 32, 36, 28);
+    doc.addPage(pw.Page(
+      pageFormat: format,
+      margin: margin,
+      build: (ctx) => pw.Column(
         crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: [
-          pw.Divider(color: _line),
-          pw.Row(
-            crossAxisAlignment: pw.CrossAxisAlignment.start,
-            children: [
-              pw.Expanded(child: footer),
-              txt('${ctx.pageNumber}/${ctx.pagesCount}', c: _muted, size: 8),
-            ],
+          pw.Expanded(
+            child: pw.FittedBox(
+              fit: pw.BoxFit.scaleDown,
+              alignment: pw.Alignment.topLeft,
+              child: pw.SizedBox(
+                width: format.width - margin.horizontal,
+                child: pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  mainAxisSize: pw.MainAxisSize.min,
+                  children: [
+                    pw.Row(
+                      crossAxisAlignment: pw.CrossAxisAlignment.start,
+                      children: [
+                        pw.Expanded(child: title),
+                        pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.end, children: [
+                          txt('AthleteSetu', b: true, c: _primary, size: 12),
+                          txt('ID ${athlete.id}', c: _muted, size: 7),
+                        ]),
+                      ],
+                    ),
+                    pw.SizedBox(height: 4),
+                    generated,
+                    pw.SizedBox(height: 10),
+                    // Two label/value pairs per row keeps the athlete block to 3 rows.
+                    pw.Table(
+                      border: pw.TableBorder.all(color: _line, width: 0.6),
+                      columnWidths: const {
+                        0: pw.FlexColumnWidth(0.9),
+                        1: pw.FlexColumnWidth(1.6),
+                        2: pw.FlexColumnWidth(0.9),
+                        3: pw.FlexColumnWidth(1.6),
+                      },
+                      children: [
+                        for (var i = 0; i < infoRows.length; i += 2)
+                          pw.TableRow(children: [
+                            for (final (k, v) in infoRows.sublist(i, i + 2)) ...[
+                              cell(infoLabels[k]!, header: true),
+                              cell(k == 'reg_gender'
+                                  ? pw.Row(children: [txt('${l10n.en(genderKey)} / '), genderValue])
+                                  : txt(v, b: k == 'reg_name')),
+                            ],
+                          ]),
+                      ],
+                    ),
+                    pw.SizedBox(height: 10),
+                    pw.Table(
+                      border: pw.TableBorder.all(color: _line, width: 0.6),
+                      columnWidths: const {
+                        0: pw.FlexColumnWidth(2.2),
+                        1: pw.FlexColumnWidth(1.3),
+                        2: pw.FlexColumnWidth(1),
+                        3: pw.FlexColumnWidth(1.1),
+                      },
+                      children: [
+                        pw.TableRow(children: [for (final h in headers) cell(h, header: true)]),
+                        for (final t in SaiTest.values)
+                          pw.TableRow(children: [
+                            cell(testCells[t]!),
+                            cell(best[t] == null
+                                ? txt('—', c: _muted)
+                                : pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+                                    txt('${t.format(best[t]!.finalScore)} ${t.unit}', b: true, size: 10),
+                                    txt('${attempts[t] ?? 0}/${t.attempts} · ${t.toleranceLabel}', c: _muted, size: 7),
+                                  ])),
+                            cell(best[t] == null ? txt('—', c: _muted) : txt('${best[t]!.confidence.round()}%')),
+                            cell(best[t] == null
+                                ? txt('—', c: _muted)
+                                : pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+                                    best[t]!.isOverride ? manual : ai,
+                                    if (best[t]!.simulated) txt('SIM', c: _primary, size: 7, b: true),
+                                  ])),
+                          ]),
+                      ],
+                    ),
+                    if (weight != null && height != null) ...[
+                      pw.SizedBox(height: 10),
+                      txt('BMI: ${bmi(weight, height).toStringAsFixed(1)} kg/m²  (${weight.toStringAsFixed(1)} kg, ${height.toStringAsFixed(1)} cm)', b: true),
+                    ],
+                    pw.SizedBox(height: 10),
+                    consentLabel,
+                    pw.SizedBox(height: 4),
+                    if (consent == null)
+                      txt('—', c: _muted)
+                    else
+                      txt(
+                        consent.isMinor
+                            ? 'Guardian consent: ${consent.guardianName} (${l10n.en(consent.guardianRelation ?? '')}) · signed form photo on file · ${date(consent.grantedAt)} · ${consent.consentVersion}'
+                            : 'Self consent (adult) · ${date(consent.grantedAt)} · ${consent.consentVersion}',
+                        c: _muted,
+                        size: 8,
+                      ),
+                  ],
+                ),
+              ),
+            ),
           ),
+          pw.Divider(color: _line),
+          footer,
         ],
       ),
-      build: (ctx) => [
-        pw.Row(
-          crossAxisAlignment: pw.CrossAxisAlignment.start,
-          children: [
-            pw.Expanded(child: title),
-            pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.end, children: [
-              txt('AthleteSetu', b: true, c: _primary, size: 12),
-              txt('ID ${athlete.id}', c: _muted, size: 7),
-            ]),
-          ],
-        ),
-        pw.SizedBox(height: 4),
-        generated,
-        pw.SizedBox(height: 14),
-        pw.Table(
-          border: pw.TableBorder.all(color: _line, width: 0.6),
-          columnWidths: const {0: pw.FlexColumnWidth(1.1), 1: pw.FlexColumnWidth(2)},
-          children: [
-            for (final (k, v) in infoRows)
-              pw.TableRow(children: [
-                cell(infoLabels[k]!, header: true),
-                cell(k == 'reg_gender'
-                    ? pw.Row(children: [txt('${l10n.en(genderKey)} / '), genderValue])
-                    : txt(v, b: k == 'reg_name')),
-              ]),
-          ],
-        ),
-        pw.SizedBox(height: 16),
-        pw.Table(
-          border: pw.TableBorder.all(color: _line, width: 0.6),
-          columnWidths: const {
-            0: pw.FlexColumnWidth(2.2),
-            1: pw.FlexColumnWidth(1.3),
-            2: pw.FlexColumnWidth(1),
-            3: pw.FlexColumnWidth(1.1),
-          },
-          children: [
-            pw.TableRow(children: [for (final h in headers) cell(h, header: true)]),
-            for (final t in SaiTest.values)
-              pw.TableRow(children: [
-                cell(testCells[t]!),
-                cell(best[t] == null
-                    ? txt('—', c: _muted)
-                    : pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
-                        txt('${t.format(best[t]!.finalScore)} ${t.unit}', b: true, size: 10),
-                        txt('${attempts[t] ?? 0}/${t.attempts} · ${t.toleranceLabel}', c: _muted, size: 7),
-                      ])),
-                cell(best[t] == null ? txt('—', c: _muted) : txt('${best[t]!.confidence.round()}%')),
-                cell(best[t] == null
-                    ? txt('—', c: _muted)
-                    : pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
-                        best[t]!.isOverride ? manual : ai,
-                        if (best[t]!.simulated) txt('SIM', c: _primary, size: 7, b: true),
-                      ])),
-              ]),
-          ],
-        ),
-        if (weight != null && height != null) ...[
-          pw.SizedBox(height: 10),
-          txt('BMI: ${bmi(weight, height).toStringAsFixed(1)} kg/m²  (${weight.toStringAsFixed(1)} kg, ${height.toStringAsFixed(1)} cm)', b: true),
-        ],
-        pw.SizedBox(height: 16),
-        consentLabel,
-        pw.SizedBox(height: 4),
-        if (consent == null)
-          txt('—', c: _muted)
-        else
-          txt(
-            consent.isMinor
-                ? 'Guardian consent: ${consent.guardianName} (${l10n.en(consent.guardianRelation ?? '')}) · signed form photo on file · ${date(consent.grantedAt)} · ${consent.consentVersion}'
-                : 'Self consent (adult) · ${date(consent.grantedAt)} · ${consent.consentVersion}',
-            c: _muted,
-            size: 8,
-          ),
-      ],
     ));
     return doc.save();
   }
