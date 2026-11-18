@@ -3,7 +3,7 @@
 /// States: flatBack → ascending → peakElbowTouch → descending → flatBack (rep).
 ///
 /// A rep counts only if, during that rep:
-///  * the hands stay locked behind the neck (wrist near ear/neck),
+///  * the hands stay locked behind the head (wrist closer to the head than the elbow),
 ///  * the elbows reach the knees at the peak,
 ///  * the shoulder blades return flat before the next ascent.
 /// Otherwise the rep is rejected and the foul is logged.
@@ -30,8 +30,9 @@ class SitUpThresholds {
     // Joint centres stay apart even when the elbow touches the knee
     // (elbow tip to knee top), so the old 0.42 thigh-lengths missed real touches.
     this.elbowKneeRatio = 0.55,
-    this.handsDetachRatio = 1.3,
+    this.handsDetachRatio = 0.25,
     this.handsDetachMs = 250,
+    this.handsFoulVoids = true,
     this.handsMinScore = 0.5,
     this.descendDropDeg = 10,
     this.reAscendDeg = 12,
@@ -42,9 +43,10 @@ class SitUpThresholds {
   });
 
   /// Wider tolerances for live use while thresholds are tuned on real athletes.
-  /// The three SAI rules still apply (touch, flat return, hands), with more slack:
-  /// "flat" up to 38°, a touch at up to 0.8 thigh lengths or simply by sitting
-  /// up to 62°, and hands must be clearly away for 0.4 s.
+  /// Touch and flat-return still void a rep, with more slack: "flat" up to 38°,
+  /// a touch at up to 0.8 thigh lengths or simply by sitting up to 62°.
+  /// Hands leaving the head are only flagged (not voided) until the hands
+  /// check is validated on real athletes.
   const SitUpThresholds.lenient()
       : this(
           flatDeg: 38,
@@ -52,8 +54,9 @@ class SitUpThresholds {
           peakMinTorsoDeg: 45,
           elbowKneeRatio: 0.8,
           uprightTouchDeg: 62,
-          handsDetachRatio: 1.6,
+          handsDetachRatio: 0.35,
           handsDetachMs: 400,
+          handsFoulVoids: false,
           handsMinScore: 0.6,
           descendDropDeg: 12,
           reAscendDeg: 18,
@@ -68,7 +71,7 @@ class SitUpThresholds {
           ascendDeg: 26,
           peakMinTorsoDeg: 55,
           elbowKneeRatio: 0.42,
-          handsDetachRatio: 0.95,
+          handsDetachRatio: 0.2,
           handsDetachMs: 90,
           handsMinScore: 0.3,
           descendDropDeg: 10,
@@ -88,9 +91,17 @@ class SitUpThresholds {
   /// Elbow–knee distance / thigh length below this counts as a touch.
   final double elbowKneeRatio;
 
-  /// Wrist–neck distance / upper-arm length above this means hands detached.
-  /// Clasped hands sit at about 0.3–0.8; a hand swung forward to push is ~1.5+.
+  /// Hands count as detached when the wrist is farther from the head than the
+  /// elbow is, by more than this many torso lengths. Clasped behind the head
+  /// the wrist is much closer to the head than the elbow (negative margin);
+  /// a hidden wrist guessed near the elbow reads about 0; a hand swung forward
+  /// to push off the knee reads +0.5 or more. Relative, so it does not depend
+  /// on foreshortened arm lengths.
   final double handsDetachRatio;
+
+  /// Whether hands leaving the head voids the rep (strict SAI) or is only
+  /// flagged on the rep for review (lenient demo rules).
+  final bool handsFoulVoids;
 
   /// The wrist must stay that far away for this long (ms), not just a few frames.
   final double handsDetachMs;
@@ -125,6 +136,8 @@ class SitUpRep {
   double? bottomTorsoDeg;
   bool touched = false;
   final Set<String> fouls = {};
+  /// Observations that did not void the rep (lenient rules), e.g. hands.
+  final Set<String> flags = {};
   bool get valid => fouls.isEmpty && touched;
 
   Map<String, Object?> toJson() => {
@@ -136,6 +149,7 @@ class SitUpRep {
         'touched': touched,
         'valid': valid,
         'fouls': fouls.toList(),
+        'flags': flags.toList(),
       };
 }
 
@@ -175,8 +189,7 @@ class SitUpSession implements MeasurementSession {
   SitUpRep? _current;
   double? _startMs;
   double? _torsoEma;
-  double? _elbowKneeEma;
-  double? _wristNeckEma;
+  final _ekWindow = <double>[];
   double _descentMin = 90;
   double? _detachSinceMs;
   int _frames = 0;
@@ -231,38 +244,50 @@ class SitUpSession implements MeasurementSession {
     final v = shoulder.p - hip.p;
     final torsoRaw = math.atan2(-v.y, v.x.abs()) * 180 / math.pi;
     final thigh = math.max(hip.p.distanceTo(knee.p), 1.0);
-    final upperArm = math.max(shoulder.p.distanceTo(elbow.p), 1.0);
-    // Neck: 60% of the way from shoulder to ear; without a usable ear, extend
-    // the torso line past the shoulder by 35%.
-    final neck = ear.score >= thresholds.minKeypointScore
-        ? Vec2.lerp(shoulder.p, ear.p, 0.6)
-        : shoulder.p + (shoulder.p - hip.p) * 0.35;
+    final torsoLen = math.max(hip.p.distanceTo(shoulder.p), 1.0);
+    // Head: the better-seen ear, else the nose, else extend the torso line
+    // past the shoulder by 35%.
+    final nose = f[KP.nose];
+    final head = ear.score >= thresholds.minKeypointScore
+        ? ear.p
+        : nose.score >= thresholds.minKeypointScore
+            ? nose.p
+            : shoulder.p + (shoulder.p - hip.p) * 0.35;
     final wristSeen = wrist.score >= thresholds.handsMinScore;
     final a = thresholds.emaAlpha;
     _torsoEma = _torsoEma == null ? torsoRaw : _torsoEma! + a * (torsoRaw - _torsoEma!);
-    final ekRaw = elbow.p.distanceTo(knee.p) / thigh;
-    _elbowKneeEma = _elbowKneeEma == null ? ekRaw : _elbowKneeEma! + a * (ekRaw - _elbowKneeEma!);
-    if (wristSeen) {
-      final wnRaw = wrist.p.distanceTo(neck) / upperArm;
-      _wristNeckEma = _wristNeckEma == null ? wnRaw : _wristNeckEma! + a * (wnRaw - _wristNeckEma!);
-    }
-    final torso = _torsoEma!, ek = _elbowKneeEma!;
-    final wn = _wristNeckEma ?? 0;
+    // Elbow-knee: median of the last 3 raw frames. Rejects single-frame
+    // jitter without the lag of an EMA, which used to hide brief real touches.
+    _ekWindow.add(elbow.p.distanceTo(knee.p) / thigh);
+    if (_ekWindow.length > 3) _ekWindow.removeAt(0);
+    final ek = ([..._ekWindow]..sort())[_ekWindow.length ~/ 2];
+    final torso = _torsoEma!;
+    // Hands margin (torso lengths): how much farther the wrist is from the
+    // head than the elbow is. Negative while the hands are clasped.
+    final handsMargin =
+        wristSeen ? (wrist.p.distanceTo(head) - elbow.p.distanceTo(head)) / torsoLen : -1.0;
+    final handsAway = wristSeen && handsMargin > thresholds.handsDetachRatio;
 
-    // Hands-behind-neck check runs through the whole rep.
+    // Hands-behind-head check runs through the whole rep.
     if (_current != null) {
-      // Foul only on clear evidence: wrist well seen AND far from the neck for
-      // handsDetachMs. A hidden wrist proves nothing either way.
-      if (wristSeen && wn > thresholds.handsDetachRatio) {
+      // Foul only on clear evidence: wrist well seen AND away for handsDetachMs.
+      if (handsAway) {
         _detachSinceMs ??= f.tMs;
         if (f.tMs - _detachSinceMs! >= thresholds.handsDetachMs) {
-          _current!.fouls.add('foul_hands_detached');
+          (thresholds.handsFoulVoids ? _current!.fouls : _current!.flags).add('foul_hands_detached');
         }
       } else {
         _detachSinceMs = null;
       }
       _current!.maxTorsoDeg = math.max(_current!.maxTorsoDeg, torso);
       _current!.minElbowKnee = math.min(_current!.minElbowKnee, ek);
+      // The touch can register at any point of the rep (up, top or on the
+      // way down): the knee is reached at the turn-around, often between frames.
+      if (!_current!.touched &&
+          ((ek < thresholds.elbowKneeRatio && _current!.maxTorsoDeg >= thresholds.peakMinTorsoDeg) ||
+              torso >= thresholds.uprightTouchDeg)) {
+        _current!.touched = true;
+      }
     }
 
     switch (_state) {
@@ -273,13 +298,11 @@ class SitUpSession implements MeasurementSession {
           _state = SitUpState.ascending;
         }
       case SitUpState.ascending:
-        if ((ek < thresholds.elbowKneeRatio && torso >= thresholds.peakMinTorsoDeg) ||
-            torso >= thresholds.uprightTouchDeg) {
-          _current!.touched = true;
+        if (_current!.touched) {
           _state = SitUpState.peakElbowTouch;
         } else if (torso < _current!.maxTorsoDeg - thresholds.descendDropDeg) {
-          // Turned back without touching.
-          _current!.fouls.add('foul_elbows_short');
+          // Turning back. A late touch can still register on the way down;
+          // "elbows short" is decided when the rep closes.
           _state = SitUpState.descending;
           _descentMin = torso;
         }
@@ -314,8 +337,7 @@ class SitUpSession implements MeasurementSession {
           tone: ek < thresholds.elbowKneeRatio ? HudTone.pass : HudTone.neutral,
           label: ek.toStringAsFixed(2)),
       if (wristSeen)
-        HudPoint(wrist.p,
-            tone: wn > thresholds.handsDetachRatio ? HudTone.foul : HudTone.pass, radius: 7),
+        HudPoint(wrist.p, tone: handsAway ? HudTone.foul : HudTone.pass, radius: 7),
     ];
     return _snapshot(f, overlay);
   }
@@ -372,12 +394,22 @@ class SitUpSession implements MeasurementSession {
               : phase,
       primary: '$validReps',
       primaryLabelKey: 'wb_valid_reps',
-      secondary: '${left}s',
+      secondary: reps.isEmpty ? '${left}s' : '${left}s · ${_repSummary(reps.last)}',
       overlay: overlay,
       fouls: List.unmodifiable(_fouls),
       complete: _complete,
       progress: elapsed / durationMs,
     );
+  }
+
+  /// Short on-screen summary of a closed rep: peak angle, closest elbow-knee
+  /// ratio, and whether it counted, e.g. "#7 64° 0.48 ✓".
+  String _repSummary(SitUpRep r) {
+    final ek = r.minElbowKnee.isFinite ? r.minElbowKnee.toStringAsFixed(2) : '–';
+    // Symbols only (no words to translate); the reason for a ✗ is already
+    // shown as a localized foul message. "✓?" = counted, hands flagged.
+    final mark = !r.valid ? '✗' : (r.flags.isEmpty ? '✓' : '✓?');
+    return '#${reps.length} ${r.maxTorsoDeg.round()}° $ek $mark';
   }
 
   @override
@@ -395,9 +427,13 @@ class SitUpSession implements MeasurementSession {
             : 0.8));
     final conf = (100 * kp.clamp(0.0, 1.0) * (1 - dropout) * decisiveness + 8).clamp(5.0, 99.0);
     final foulCounts = <String, int>{};
+    final flagCounts = <String, int>{};
     for (final r in reps) {
       for (final fl in r.fouls) {
         foulCounts[fl] = (foulCounts[fl] ?? 0) + 1;
+      }
+      for (final fl in r.flags) {
+        flagCounts[fl] = (flagCounts[fl] ?? 0) + 1;
       }
     }
     return AttemptOutcome(
@@ -410,6 +446,7 @@ class SitUpSession implements MeasurementSession {
         'attemptedReps': total,
         'rejectedReps': total - validReps,
         'foulCounts': foulCounts,
+        'flagCounts': flagCounts,
         'reps': reps.map((r) => r.toJson()).toList(),
         'durationSec': durationMs / 1000,
         'rules': thresholds.name,
