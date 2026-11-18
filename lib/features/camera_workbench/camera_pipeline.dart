@@ -266,7 +266,8 @@ Future<({String path, int size, double? lat, double? lng})> archiveVideo(
     await src.copy(dest);
     await src.delete();
   }
-  final pos = await _tryPosition();
+  // Location is a nice-to-have tag: never let a slow GPS hold up saving.
+  final pos = await _tryPosition().timeout(const Duration(seconds: 2), onTimeout: () => null);
   return (path: dest, size: await File(dest).length(), lat: pos?.latitude, lng: pos?.longitude);
 }
 
