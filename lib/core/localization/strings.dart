@@ -186,6 +186,7 @@ const Map<String, List<String>> kStrings = {
   'wb_two_phone': ['2-phone gate', '2-फ़ोन गेट'],
   'wb_capture_scale': ['Capture scale display', 'वज़न मशीन डिस्प्ले की फ़ोटो लें'],
   'wb_ocr_reading': ['Reading display…', 'डिस्प्ले पढ़ा जा रहा है…'],
+  'wb_calculating': ['Calculating…', 'गणना हो रही है…'],
   'wb_bmi': ['BMI {bmi} kg/m²', 'BMI {bmi} किग्रा/मी²'],
   'wb_bmi_missing': ['Measure height first for BMI', 'BMI हेतु पहले लंबाई मापें'],
   'wb_scrub_title': ['Confirm landing point', 'गिरने का बिंदु पुष्टि करें'],

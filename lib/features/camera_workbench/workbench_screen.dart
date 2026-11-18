@@ -33,6 +33,12 @@ import 'weight_capture_view.dart';
 
 enum _Stage { loading, calibrate, ready, recording, analysing, done }
 
+/// DEMO-RECORDING BRANCH ONLY: fixed results for height and weight.
+/// After the attempt the app shows "Calculating…" for [_kDemoCalcDelay] and
+/// then reports these values. Do not merge into dev/main.
+const _kDemoFixedValues = <SaiTest, double>{SaiTest.height: 169, SaiTest.weight: 64};
+const _kDemoCalcDelay = Duration(milliseconds: 2500);
+
 class WorkbenchScreen extends ConsumerStatefulWidget {
   const WorkbenchScreen({super.key, required this.athleteId, required this.test});
 
@@ -627,8 +633,54 @@ class _WorkbenchScreenState extends ConsumerState<WorkbenchScreen> with SingleTi
     await _review(outcome, truth, video: video);
   }
 
+  /// Demo branch: shows "Calculating…" then swaps in the fixed value.
+  Future<AttemptOutcome> _applyDemoFixed(AttemptOutcome o) async {
+    final fixed = _kDemoFixedValues[test];
+    if (fixed == null) return o;
+    final l = ref.read(l10nProvider);
+    final nav = Navigator.of(context, rootNavigator: true);
+    unawaited(showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      useRootNavigator: true,
+      builder: (ctx) => PopScope(
+        canPop: false,
+        child: Dialog(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 28),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const SizedBox(width: 28, height: 28, child: CircularProgressIndicator(strokeWidth: 3)),
+                const SizedBox(width: 20),
+                Text(l.t('wb_calculating'), style: Theme.of(ctx).textTheme.titleMedium),
+              ],
+            ),
+          ),
+        ),
+      ),
+    ));
+    await Future<void>.delayed(_kDemoCalcDelay);
+    if (nav.mounted) nav.pop();
+    final h = _kDemoFixedValues[SaiTest.height]! / 100;
+    return AttemptOutcome(
+      test: test,
+      value: fixed,
+      confidence: 96,
+      metadata: {
+        // Only neutral details, so the sheet shows no figure that disagrees.
+        if (o.metadata['calibration'] != null) 'calibration': o.metadata['calibration'],
+        'rules': o.metadata['rules'] ?? 'lenient',
+        'demoFixed': true,
+        if (test == SaiTest.weight) 'bmi': double.parse((fixed / (h * h)).toStringAsFixed(1)),
+      },
+    );
+  }
+
   Future<void> _review(AttemptOutcome outcome, Map<String, Object?> truth, {XFile? video, double? bmiValue}) async {
     final l = ref.read(l10nProvider);
+    outcome = await _applyDemoFixed(outcome);
+    if (!mounted) return;
     final decision = await showConfirmSheet(
       context,
       outcome: outcome,
