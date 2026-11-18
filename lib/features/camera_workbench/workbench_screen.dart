@@ -93,6 +93,7 @@ class _WorkbenchScreenState extends ConsumerState<WorkbenchScreen> with SingleTi
   final _countdown = ValueNotifier<String?>(null);
   /// Demo branch: in-screen "Calculating…" / "Saved" card (text, busy, ok).
   final _demoOverlay = ValueNotifier<(String, bool, bool)?>(null);
+  DateTime? _demoRecStart, _demoFirstRead;
   Timer? _goEndTimer;
 
   // Printed marker side as measured with a ruler (printers often scale ~96–98%).
@@ -577,7 +578,19 @@ class _WorkbenchScreenState extends ConsumerState<WorkbenchScreen> with SingleTi
           _sync!.sendStart(s);
         }
       }
-      if (session.isComplete) _finishAttempt();
+      if (session.isComplete) {
+        _finishAttempt();
+      } else if (test == SaiTest.height && _kDemoFixedValues.containsKey(test)) {
+        // Demo branch: don't wait for a perfectly steady reading. Finish 1.5 s
+        // after the first height reading, or after 6 s of recording regardless.
+        final now = DateTime.now();
+        _demoRecStart ??= now;
+        if (snap.primary != null) _demoFirstRead ??= now;
+        if ((_demoFirstRead != null && now.difference(_demoFirstRead!).inMilliseconds >= 1500) ||
+            now.difference(_demoRecStart!).inMilliseconds >= 6000) {
+          _finishAttempt();
+        }
+      }
     }
     _hud.value = HudFrame(
       imageWidth: r.frame.width,
@@ -593,6 +606,8 @@ class _WorkbenchScreenState extends ConsumerState<WorkbenchScreen> with SingleTi
   Future<void> _finishAttempt() async {
     if (_finishing) return;
     _finishing = true;
+    _demoRecStart = null;
+    _demoFirstRead = null;
     _ticker.stop();
     _simStartTimer?.cancel();
     _goEndTimer?.cancel();
@@ -600,7 +615,9 @@ class _WorkbenchScreenState extends ConsumerState<WorkbenchScreen> with SingleTi
     setState(() => _stage = _Stage.analysing);
 
     XFile? video;
-    if (!_simulated) video = await _pipeline?.stopRecording();
+    if (!_simulated) {
+      video = await _pipeline?.stopRecording().timeout(const Duration(seconds: 5), onTimeout: () => null);
+    }
 
     final session = _session!;
     var outcome = session.finalize();
