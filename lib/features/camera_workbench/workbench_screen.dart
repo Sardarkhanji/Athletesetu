@@ -34,8 +34,9 @@ import 'weight_capture_view.dart';
 enum _Stage { loading, calibrate, ready, recording, analysing, done }
 
 /// DEMO-RECORDING BRANCH ONLY: fixed results for height and weight.
-/// After the attempt the app shows "Calculating…" for [_kDemoCalcDelay] and
-/// then reports these values. Do not merge into dev/main.
+/// After the attempt the app shows "Calculating…" for [_kDemoCalcDelay],
+/// then saves these values straight away (no confirm sheet) and shows
+/// "Saved: …". Do not merge into dev/main.
 const _kDemoFixedValues = <SaiTest, double>{SaiTest.height: 169, SaiTest.weight: 64.8};
 const _kDemoCalcDelay = Duration(milliseconds: 2500);
 
@@ -90,6 +91,8 @@ class _WorkbenchScreenState extends ConsumerState<WorkbenchScreen> with SingleTi
 
   // Sit-ups "3-2-1-Go": the countdown digit or 'go' shown over the preview.
   final _countdown = ValueNotifier<String?>(null);
+  /// Demo branch: in-screen "Calculating…" / "Saved" card (text, busy, ok).
+  final _demoOverlay = ValueNotifier<(String, bool, bool)?>(null);
   Timer? _goEndTimer;
 
   // Printed marker side as measured with a ruler (printers often scale ~96–98%).
@@ -189,6 +192,7 @@ class _WorkbenchScreenState extends ConsumerState<WorkbenchScreen> with SingleTi
     _simStartTimer?.cancel();
     _goEndTimer?.cancel();
     _countdown.dispose();
+    _demoOverlay.dispose();
     _sync?.dispose();
     _pipeline?.dispose();
     _hud.dispose();
@@ -633,42 +637,15 @@ class _WorkbenchScreenState extends ConsumerState<WorkbenchScreen> with SingleTi
     await _review(outcome, truth, video: video);
   }
 
-  /// Demo branch: shows "Calculating…" then swaps in the fixed value.
-  Future<AttemptOutcome> _applyDemoFixed(AttemptOutcome o) async {
-    final fixed = _kDemoFixedValues[test];
-    if (fixed == null) return o;
-    final l = ref.read(l10nProvider);
-    final nav = Navigator.of(context, rootNavigator: true);
-    unawaited(showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      useRootNavigator: true,
-      builder: (ctx) => PopScope(
-        canPop: false,
-        child: Dialog(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 28),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const SizedBox(width: 28, height: 28, child: CircularProgressIndicator(strokeWidth: 3)),
-                const SizedBox(width: 20),
-                Text(l.t('wb_calculating'), style: Theme.of(ctx).textTheme.titleMedium),
-              ],
-            ),
-          ),
-        ),
-      ),
-    ));
-    await Future<void>.delayed(_kDemoCalcDelay);
-    if (nav.mounted) nav.pop();
+  /// Demo branch: the attempt's outcome with the fixed value swapped in.
+  AttemptOutcome _demoOutcome(AttemptOutcome o, double fixed) {
     final h = _kDemoFixedValues[SaiTest.height]! / 100;
     return AttemptOutcome(
       test: test,
       value: fixed,
       confidence: 96,
       metadata: {
-        // Only neutral details, so the sheet shows no figure that disagrees.
+        // Only neutral details, so nothing shown disagrees with the value.
         if (o.metadata['calibration'] != null) 'calibration': o.metadata['calibration'],
         'rules': o.metadata['rules'] ?? 'lenient',
         'demoFixed': true,
@@ -677,10 +654,44 @@ class _WorkbenchScreenState extends ConsumerState<WorkbenchScreen> with SingleTi
     );
   }
 
+  /// Demo branch: "Calculating…", then save the fixed value at once and show
+  /// "Saved: …". Uses an in-screen card (no dialog route), and any save error
+  /// is shown instead of leaving the screen loading.
+  Future<void> _demoAutoSave(AttemptOutcome o, double fixed, Map<String, Object?> truth, XFile? video) async {
+    final l = ref.read(l10nProvider);
+    _demoOverlay.value = (l.t('wb_calculating'), true, true);
+    await Future<void>.delayed(_kDemoCalcDelay);
+    if (!mounted) return;
+    final outcome = _demoOutcome(o, fixed);
+    var saved = false;
+    String msg;
+    try {
+      await _save(outcome, ConfirmDecision(ConfirmAction.confirm, value: fixed), truth, video)
+          .timeout(const Duration(seconds: 10));
+      saved = true;
+      msg = l.t('sheet_saved', {'value': '${test.format(fixed)} ${l.unit(test)}'});
+      CameraPipeline.log('demo ${test.id} saved $fixed');
+    } catch (e) {
+      CameraPipeline.log('demo ${test.id} save failed: $e');
+      msg = l.t('error_generic', {'msg': e});
+    }
+    if (!mounted) return;
+    _demoOverlay.value = (msg, false, saved);
+    await Future<void>.delayed(Duration(milliseconds: saved ? 1500 : 3000));
+    if (!mounted) return;
+    _demoOverlay.value = null;
+    ref.invalidate(freeStorageProvider);
+    setState(() {
+      if (saved) _attemptNo++;
+      _stage = _attemptNo > test.attempts ? _Stage.done : _Stage.ready;
+    });
+    if (_simulated && test.needsCamera) _pushIdleHud();
+  }
+
   Future<void> _review(AttemptOutcome outcome, Map<String, Object?> truth, {XFile? video, double? bmiValue}) async {
     final l = ref.read(l10nProvider);
-    outcome = await _applyDemoFixed(outcome);
-    if (!mounted) return;
+    final fixed = _kDemoFixedValues[test];
+    if (fixed != null) return _demoAutoSave(outcome, fixed, truth, video);
     final decision = await showConfirmSheet(
       context,
       outcome: outcome,
@@ -857,13 +868,44 @@ class _WorkbenchScreenState extends ConsumerState<WorkbenchScreen> with SingleTi
             _header(l),
             ?simBanner,
             Expanded(
-              child: test.needsCamera
-                  ? _viewport(l)
-                  : WeightCaptureView(
-                      simulated: _simulated,
-                      heightCm: _athlete?.heightCm,
-                      onOutcome: (o, truth) => _review(o, truth),
-                    ),
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  test.needsCamera
+                      ? _viewport(l)
+                      : WeightCaptureView(
+                          simulated: _simulated,
+                          heightCm: _athlete?.heightCm,
+                          onOutcome: (o, truth) => _review(o, truth),
+                        ),
+                  ValueListenableBuilder<(String, bool, bool)?>(
+                    valueListenable: _demoOverlay,
+                    builder: (context, v, _) => v == null
+                        ? const SizedBox.shrink()
+                        : AbsorbPointer(
+                            child: Center(
+                              child: Card(
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      if (v.$2)
+                                        const SizedBox(width: 28, height: 28, child: CircularProgressIndicator(strokeWidth: 3))
+                                      else
+                                        Icon(v.$3 ? Icons.check_circle_rounded : Icons.error_outline_rounded,
+                                            color: v.$3 ? AppColors.pass : AppColors.foul, size: 28),
+                                      const SizedBox(width: 16),
+                                      Flexible(child: Text(v.$1, style: Theme.of(context).textTheme.titleMedium)),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                  ),
+                ],
+              ),
             ),
             if (test.needsCamera || _stage == _Stage.done) _bottomPanel(l),
           ],
