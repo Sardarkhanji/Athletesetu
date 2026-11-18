@@ -614,6 +614,32 @@ class _WorkbenchScreenState extends ConsumerState<WorkbenchScreen> with SingleTi
     _countdown.value = null;
     setState(() => _stage = _Stage.analysing);
 
+    // Demo branch: height/weight never wait on the camera, the engine or the
+    // video file. Stop the recording in the background (and drop the clip),
+    // then save the fixed value.
+    final demoFixed = _kDemoFixedValues[test];
+    if (demoFixed != null) {
+      AttemptOutcome base;
+      try {
+        base = _session!.finalize();
+      } catch (e) {
+        CameraPipeline.log('demo finalize failed: $e');
+        base = AttemptOutcome(test: test, value: null, confidence: 0);
+      }
+      if (!_simulated) {
+        unawaited(() async {
+          try {
+            final v = await _pipeline?.stopRecording().timeout(const Duration(seconds: 8));
+            if (v != null) await File(v.path).delete();
+          } catch (e) {
+            CameraPipeline.log('demo stopRecording: $e');
+          }
+        }());
+      }
+      await _demoAutoSave(base, demoFixed, const {}, null);
+      return;
+    }
+
     XFile? video;
     if (!_simulated) {
       video = await _pipeline?.stopRecording().timeout(const Duration(seconds: 5), onTimeout: () => null);
@@ -676,33 +702,40 @@ class _WorkbenchScreenState extends ConsumerState<WorkbenchScreen> with SingleTi
   /// is shown instead of leaving the screen loading.
   Future<void> _demoAutoSave(AttemptOutcome o, double fixed, Map<String, Object?> truth, XFile? video) async {
     final l = ref.read(l10nProvider);
-    _demoOverlay.value = (l.t('wb_calculating'), true, true);
-    await Future<void>.delayed(_kDemoCalcDelay);
-    if (!mounted) return;
-    final outcome = _demoOutcome(o, fixed);
     var saved = false;
-    String msg;
     try {
-      await _save(outcome, ConfirmDecision(ConfirmAction.confirm, value: fixed), truth, video)
-          .timeout(const Duration(seconds: 10));
-      saved = true;
-      msg = l.t('sheet_saved', {'value': '${test.format(fixed)} ${l.unit(test)}'});
-      CameraPipeline.log('demo ${test.id} saved $fixed');
-    } catch (e) {
-      CameraPipeline.log('demo ${test.id} save failed: $e');
-      msg = l.t('error_generic', {'msg': e});
+      _demoOverlay.value = (l.t('wb_calculating'), true, true);
+      await Future<void>.delayed(_kDemoCalcDelay);
+      if (!mounted) return;
+      String msg;
+      try {
+        await _save(_demoOutcome(o, fixed), ConfirmDecision(ConfirmAction.confirm, value: fixed), truth, video)
+            .timeout(const Duration(seconds: 8));
+        saved = true;
+        msg = l.t('sheet_saved', {'value': '${test.format(fixed)} ${l.unit(test)}'});
+        CameraPipeline.log('demo ${test.id} saved $fixed');
+      } catch (e) {
+        CameraPipeline.log('demo ${test.id} save failed: $e');
+        msg = l.t('error_generic', {'msg': e});
+      }
+      if (!mounted) return;
+      _demoOverlay.value = (msg, false, saved);
+      await Future<void>.delayed(Duration(milliseconds: saved ? 1500 : 3000));
+    } finally {
+      // Always leave the loading state, whatever happened above.
+      if (mounted) {
+        _demoOverlay.value = null;
+        _finishing = false;
+        setState(() {
+          if (saved) _attemptNo++;
+          _stage = _attemptNo > test.attempts ? _Stage.done : _Stage.ready;
+        });
+        try {
+          ref.invalidate(freeStorageProvider);
+          if (_simulated && test.needsCamera) _pushIdleHud();
+        } catch (_) {}
+      }
     }
-    if (!mounted) return;
-    _demoOverlay.value = (msg, false, saved);
-    await Future<void>.delayed(Duration(milliseconds: saved ? 1500 : 3000));
-    if (!mounted) return;
-    _demoOverlay.value = null;
-    ref.invalidate(freeStorageProvider);
-    setState(() {
-      if (saved) _attemptNo++;
-      _stage = _attemptNo > test.attempts ? _Stage.done : _Stage.ready;
-    });
-    if (_simulated && test.needsCamera) _pushIdleHud();
   }
 
   Future<void> _review(AttemptOutcome outcome, Map<String, Object?> truth, {XFile? video, double? bmiValue}) async {
